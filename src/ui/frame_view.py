@@ -45,6 +45,7 @@ class FrameView(QWidget):
         self.frame_idx = 0
         self.selected_id: Optional[str] = None
         self.preview_mask = False
+        self.show_inactive = False   # 是否显示当前帧不生效的框
 
         self.mode = self.MODE_NONE
         self._start = QPoint()
@@ -75,6 +76,10 @@ class FrameView(QWidget):
 
     def set_selected(self, box_id: Optional[str]) -> None:
         self.selected_id = box_id
+        self.update()
+
+    def set_show_inactive(self, on: bool) -> None:
+        self.show_inactive = on
         self.update()
 
     # ---------- 坐标换算 ----------
@@ -129,8 +134,10 @@ class FrameView(QWidget):
         if not self._img:
             return
         p = e.position().toPoint()
+        # 只有当前帧生效的框才可拖动/缩放：
+        # 已过期的框即使被选中也只显示虚影，不能抢占鼠标，否则框内无法再建新框
         sel = self._box_by_id(self.selected_id)
-        if sel is not None:
+        if sel is not None and sel.covers(self.frame_idx):
             h = self._hit_handle(sel, p)
             if h:
                 self.mode = self.MODE_RESIZE
@@ -138,8 +145,7 @@ class FrameView(QWidget):
                 self._orig = (sel.x, sel.y, sel.w, sel.h)
                 self._start = p
                 return
-        # 所有框都可点选（非活跃框也要能选中，否则无法再改它的时段）
-        for b in reversed(self.boxes):
+        for b in reversed(self._active_boxes()):
             if self.box_rect_widget(b).contains(p):
                 self.mode = self.MODE_MOVE
                 self._orig = (b.x, b.y, b.w, b.h)
@@ -222,17 +228,19 @@ class FrameView(QWidget):
         for i, b in enumerate(self.boxes):
             active = b.covers(self.frame_idx)
             sel = b.id == self.selected_id
-            col = color_of(i)
+            # 不在当前帧生效的框默认不画（避免过期框一直占画面）；
+            # 被列表选中的显示虚影以便确认位置；开关打开时全部显示。
+            if not active and not sel and not self.show_inactive:
+                continue
+            col = QColor(color_of(i))
+            if not active:
+                col.setAlpha(130 if sel else 80)
             pen = QPen(col, 2 if sel else 1)
             pen.setStyle(Qt.PenStyle.SolidLine if active else Qt.PenStyle.DashLine)
-            if not active:
-                col = QColor(col)
-                col.setAlpha(90)
-                pen.setColor(col)
             p.setPen(pen)
             r = self.box_rect_widget(b)
             p.drawRect(r)
-            if sel:
+            if sel and active:      # 虚影不可交互，不画把手
                 p.setBrush(QBrush(col))
                 for hp in (r.topLeft(), r.topRight(), r.bottomRight(), r.bottomLeft()):
                     p.drawRect(QRect(hp.x() - 3, hp.y() - 3, 6, 6))
@@ -242,8 +250,8 @@ class FrameView(QWidget):
                 f = QFont()
                 f.setPointSize(8)
                 p.setFont(f)
-                p.drawText(r.topLeft().x(), max(10, r.topLeft().y() - 4),
-                           f"#{i+1} {b.start}-{b.end}")
+                tag = f"#{i+1} {b.start}-{b.end}" + ("" if active else " (不在当前帧)")
+                p.drawText(r.topLeft().x(), max(10, r.topLeft().y() - 4), tag)
 
         if self._temp_rect:
             p.setPen(QPen(QColor("#ffe082"), 1, Qt.PenStyle.DashLine))

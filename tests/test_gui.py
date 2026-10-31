@@ -128,6 +128,32 @@ def main() -> int:
     app.processEvents()
     check("seek 后时段内仍活跃", b is not None and b.covers(30), f"frame={w.frame_idx}")
 
+    # 回归：过期框不应再占位，且框内可以新建框
+    b.start, b.end = 0, 20
+    w.project.boxes = [b]
+    w.panel.project = w.project
+    w.panel.refresh()
+    w._refresh_boxes()
+    w.seek(60)
+    app.processEvents()
+    check("过期框不参与交互", b not in w.view._active_boxes(), f"frame={w.frame_idx}")
+    check("过期框默认不绘制", not w.view.show_inactive)
+    QTest.mousePress(w.view, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, p1)
+    QTest.mouseMove(w.view, p2)
+    QTest.mouseRelease(w.view, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, p2)
+    app.processEvents()
+    check("过期框内可新建框", len(w.project.boxes) == 2,
+          str([(x.start, x.end) for x in w.project.boxes]))
+    check("原框未被拖动", (b.start, b.end) == (0, 20), f"{b.start}-{b.end}")
+    check("新框时段=当前帧", w.project.boxes[1].start == 60 and w.project.boxes[1].end == 60)
+    # Esc 清除选中
+    QTest.keyClick(w, Qt.Key.Key_Escape)
+    app.processEvents()
+    check("Esc 取消选中", w.view.selected_id is None)
+    w.project.boxes = [b]   # 还原为单框继续跑擦除
+    w._refresh_boxes()
+    b.start, b.end = 0, w.meta.nb_frames - 1
+
     # 一键擦除（屏蔽对话框）
     QFileDialog.getSaveFileName = staticmethod(lambda *a, **k: (OUT, ""))
     QMessageBox.information = staticmethod(lambda *a, **k: None)

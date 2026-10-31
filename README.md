@@ -33,9 +33,30 @@
 | `Space` | 播放 / 暂停 |
 | `I` / `O` | 选中框的入点 / 出点 = 当前帧 |
 | `Delete` | 删除选中框 |
+| `Esc` | 取消选中 |
 | `Ctrl+S` / `Ctrl+O` | 保存工程 / 打开视频 |
+| `Ctrl+B` | 批量擦除 |
 
 鼠标：拖空白 = 新建框；拖框内 = 移动；拖四角 = 缩放；点时间轴 = 跳转。
+
+## 框的显示规则
+
+- **当前帧生效的框**：实线彩色 + 序号/时段标签，可拖动、四角可缩放
+- **当前帧不生效的框（已过期/还没开始）**：默认**不绘制、也不参与鼠标操作**，
+  所以在旧框所在位置可以直接拖出新框。在右侧列表选中它时，会以虚影显示并标注
+  `(不在当前帧)`，方便确认位置（虚影不能拖动）
+- 想一次看到所有框：勾选工具栏 **显示非活跃框**
+
+## 批量擦除
+
+工具栏 **批量擦除**（`Ctrl+B`）：一次选多个工程 json，串行处理。
+
+- 每个工程用**自己的 settings 和输出路径**（工程里的 `output` 字段）
+- 默认勾选「跳过输出已存在的」= 断点续跑，中途加新任务重跑不会重算已完成的
+- 可中途取消：跑完当前这条就停，已产出的文件保留
+- 列表显示每个工程的视频、框数、输出、状态；底部有总进度条
+
+实测：1280x720/3s + 960x540/2s 两个工程共 150 帧，串行 52.6s。
 
 ## 擦除原理
 
@@ -74,8 +95,9 @@
 ## 自测
 
 ```
-<MAIN_ENV>\Scripts\python.exe tests/test_smoke.py   # 核心链路（含 seek 精度、GPU batch、端到端）
-<MAIN_ENV>\Scripts\python.exe tests/test_gui.py     # GUI 全流程（offscreen，含模拟拖框/键盘/擦除）
+<MAIN_ENV>\Scripts\python.exe tests/test_smoke.py   # 核心链路（seek 精度、GPU batch、端到端）
+<MAIN_ENV>\Scripts\python.exe tests/test_gui.py     # GUI 全流程（offscreen，模拟拖框/键盘/擦除/过期框回归）
+<MAIN_ENV>\Scripts\python.exe tests/test_batch.py   # 批量串行 + 断点续跑
 ```
 
 ## 已知限制

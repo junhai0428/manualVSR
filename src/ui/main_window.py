@@ -19,6 +19,7 @@ from ..inpaint_engine import InpaintEngine
 from .frame_view import FrameView
 from .timeline import TimelineWidget
 from .box_panel import BoxPanel
+from .batch_dialog import BatchDialog
 
 
 class MainWindow(QMainWindow):
@@ -54,11 +55,21 @@ class MainWindow(QMainWindow):
         self.act_erase = QAction("开始擦除", self); self.act_erase.triggered.connect(self.start_erase)
         self.act_cancel = QAction("取消", self); self.act_cancel.setEnabled(False)
         self.act_cancel.triggered.connect(self.cancel_erase)
+        self.act_batch = QAction("批量擦除 (Ctrl+B)", self)
+        self.act_batch.triggered.connect(self.open_batch)
+        self.act_ghost = QAction("显示非活跃框", self)
+        self.act_ghost.setCheckable(True)
+        self.act_ghost.setChecked(False)
+        self.act_ghost.toggled.connect(self._on_ghost_toggled)
+        self.act_ghost.setToolTip("勾选后，当前帧不生效的框也会以淡虚线显示")
         for a in (self.act_open, self.act_save, self.act_load):
             tb.addAction(a)
         tb.addSeparator()
         tb.addAction(self.act_erase)
         tb.addAction(self.act_cancel)
+        tb.addSeparator()
+        tb.addAction(self.act_batch)
+        tb.addAction(self.act_ghost)
 
         left = QWidget()
         lv = QVBoxLayout(left)
@@ -136,8 +147,10 @@ class MainWindow(QMainWindow):
             (K.Key_I, self._set_in),
             (K.Key_O, self._set_out),
             (K.Key_Delete, self._delete_selected),
+            (K.Key_Escape, lambda: self._on_select(None)),
             (QKeySequence("Ctrl+S"), self.save_project),
             (QKeySequence("Ctrl+O"), self.open_video_dialog),
+            (QKeySequence("Ctrl+B"), self.open_batch),
         ]
         self._shortcuts = []
         for key, fn in pairs:
@@ -376,6 +389,13 @@ class MainWindow(QMainWindow):
         self.act_cancel.setEnabled(False)
         QMessageBox.critical(self, "擦除失败", err)
         self.lb_status.setText(f"失败: {err}")
+
+    def _on_ghost_toggled(self, on: bool) -> None:
+        self.view.set_show_inactive(on)
+
+    def open_batch(self) -> None:
+        dlg = BatchDialog(self.engine, self)
+        dlg.exec()
 
     def closeEvent(self, e) -> None:
         self._play_timer.stop()
