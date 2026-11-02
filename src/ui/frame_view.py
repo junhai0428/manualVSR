@@ -195,9 +195,10 @@ class FrameView(QWidget):
             if r is not None and r.width() > 4 and r.height() > 4:
                 p1 = self.to_video(r.topLeft())
                 p2 = self.to_video(r.bottomRight())
+                # 出点未定：从当前帧一直生效到末尾（虚线），按 O 再定出点
                 b = Box(x=max(0, p1.x()), y=max(0, p1.y()),
                         w=max(4, p2.x() - p1.x()), h=max(4, p2.y() - p1.y()),
-                        start=self.frame_idx, end=self.frame_idx)
+                        start=self.frame_idx, end=self.frame_idx, open_end=True)
                 self.selected_id = b.id
                 self.box_created.emit(b)
                 self.selection_changed.emit(b)
@@ -236,7 +237,9 @@ class FrameView(QWidget):
             if not active:
                 col.setAlpha(130 if sel else 80)
             pen = QPen(col, 2 if sel else 1)
-            pen.setStyle(Qt.PenStyle.SolidLine if active else Qt.PenStyle.DashLine)
+            # 实线=两端已定；虚线=有未定端(延伸到开头/末尾) 或 当前帧不生效
+            solid = active and not b.is_open()
+            pen.setStyle(Qt.PenStyle.SolidLine if solid else Qt.PenStyle.DashLine)
             p.setPen(pen)
             r = self.box_rect_widget(b)
             p.drawRect(r)
@@ -250,7 +253,7 @@ class FrameView(QWidget):
                 f = QFont()
                 f.setPointSize(8)
                 p.setFont(f)
-                tag = f"#{i+1} {b.start}-{b.end}" + ("" if active else " (不在当前帧)")
+                tag = f"#{i+1} {b.span_text()}" + ("" if active else " (不在当前帧)")
                 p.drawText(r.topLeft().x(), max(10, r.topLeft().y() - 4), tag)
 
         if self._temp_rect:

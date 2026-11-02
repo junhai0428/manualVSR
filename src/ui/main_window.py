@@ -264,7 +264,9 @@ class MainWindow(QMainWindow):
         self.dirty = True
         self._refresh_boxes()
         self.panel.select_box(b.id)
-        self.lb_status.setText(f"新增框 start=end={self.frame_idx}；移动时间轴后按 O 设出点")
+        self.lb_status.setText(
+            f"新增框：入点={self.frame_idx}，出点未定 → 虚线一直生效到末尾；"
+            f"往后找出点后按 O 定死")
 
     def _on_boxes_changed(self) -> None:
         self.dirty = True
@@ -292,16 +294,10 @@ class MainWindow(QMainWindow):
         self.timeline.update()
 
     def _set_in(self) -> None:
-        b = self.panel.current_box()
-        if b:
-            b.start = min(self.frame_idx, b.end)
-            self._on_boxes_changed()
+        self.panel._set_in()
 
     def _set_out(self) -> None:
-        b = self.panel.current_box()
-        if b:
-            b.end = max(self.frame_idx, b.start)
-            self._on_boxes_changed()
+        self.panel._set_out()
 
     # ---------------- 工程 ----------------
     def save_project(self) -> None:

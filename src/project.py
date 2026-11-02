@@ -14,7 +14,12 @@ PROJECT_EXT = ".suberase.json"
 
 @dataclass
 class Box:
-    """坐标系：源视频原始像素。start/end 为闭区间帧号。"""
+    """坐标系：源视频原始像素。start/end 为闭区间帧号。
+
+    open_end=True  : 出点未定，时段从 start 延伸到末尾（新建框的默认状态）
+    open_start=True: 入点未定，时段从开头延伸到 end
+    两个都为 True 即全片生效。
+    """
     x: int
     y: int
     w: int
@@ -23,6 +28,8 @@ class Box:
     end: int
     enabled: bool = True
     label: str = ""
+    open_end: bool = False
+    open_start: bool = False
     id: str = field(default_factory=lambda: uuid.uuid4().hex[:8])
 
     @property
@@ -30,7 +37,11 @@ class Box:
         return (self.x, self.y, self.w, self.h)
 
     def covers(self, frame: int) -> bool:
-        return self.enabled and self.start <= frame <= self.end
+        if not self.enabled:
+            return False
+        lo = 0 if self.open_start else self.start
+        hi = 10 ** 9 if self.open_end else self.end
+        return lo <= frame <= hi
 
     def clamp(self, width: int, height: int, nb_frames: int) -> None:
         self.x = max(0, min(self.x, width - 1))
@@ -39,6 +50,26 @@ class Box:
         self.h = max(1, min(self.h, height - self.y))
         self.start = max(0, min(self.start, nb_frames - 1))
         self.end = max(self.start, min(self.end, nb_frames - 1))
+
+    # ---- 显示/查询辅助 ----
+    def is_open(self) -> bool:
+        """任一端未定 = 半开放框（虚线显示）。"""
+        return self.open_start or self.open_end
+
+    def span(self, nb_frames: int) -> tuple:
+        """实际生效的帧区间（含未定端的展开）。"""
+        lo = 0 if self.open_start else self.start
+        hi = max(0, nb_frames - 1) if self.open_end else self.end
+        return lo, hi
+
+    def span_text(self) -> str:
+        if self.open_start and self.open_end:
+            return "全片"
+        if self.open_start:
+            return f"开头 - {self.end}"
+        if self.open_end:
+            return f"{self.start} - 末尾"
+        return f"{self.start} - {self.end}"
 
 
 @dataclass
@@ -103,6 +134,8 @@ class Project:
                     start=int(b["start"]), end=int(b["end"]),
                     enabled=bool(b.get("enabled", True)),
                     label=str(b.get("label", "")),
+                    open_end=bool(b.get("open_end", False)),
+                    open_start=bool(b.get("open_start", False)),
                     id=str(b.get("id") or uuid.uuid4().hex[:8]),
                 )
                 p.boxes.append(box)

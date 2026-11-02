@@ -7,7 +7,7 @@ import os
 import shutil
 import sys
 
-CACHE_ROOT = r"<MODEL_DIR>"
+CACHE_ROOT = r"<MAIN_ENV>\models"
 CANDIDATE_SOURCES = [
     os.path.join(os.path.expanduser("~"), ".cache", "torch", "hub", "checkpoints", "big-lama.pt"),
     r"<USERPROFILE>\.cache\torch\hub\checkpoints\big-lama.pt",

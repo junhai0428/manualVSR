@@ -11,6 +11,10 @@ import os
 import shutil
 import subprocess
 
+# 必须在 import numpy/PIL 之前：OMP 多线程与 FreeType/ffmpeg 冲突会直接
+# 让进程访问冲突(0xC0000005)崩溃（实测复现）。
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
-"""批量擦除自测：多工程串行 + 断点续跑（跳过已存在输出）。
+"""批量擦除自测：同一真实素材 + 两个不同时段的工程，串行跑 + 断点续跑。
 
-运行:  <MAIN_ENV>\\Scripts\\python.exe tests/test_batch.py
+运行:  <MAIN_ENV>\Scripts\python.exe tests/test_batch.py
 """
 from __future__ import annotations
 
@@ -21,17 +21,17 @@ set_cache_env()
 from PySide6.QtCore import QEventLoop, QTimer  # noqa: E402
 from PySide6.QtWidgets import QApplication, QMessageBox  # noqa: E402
 
-from src.project import Project, Box, Settings, default_project_path  # noqa: E402
+from src.project import Project, Box, Settings  # noqa: E402
 from src.inpaint_engine import InpaintEngine  # noqa: E402
 from src.ui.batch_dialog import BatchDialog  # noqa: E402
 from src.video_io import probe  # noqa: E402
-from tools.make_test_video import gen  # noqa: E402
 
-DIR = r"E:\tmp\suberase_batch"
-V1 = os.path.join(DIR, "clip_a.mp4")
-V2 = os.path.join(DIR, "clip_b.mp4")
-O1 = os.path.join(DIR, "clip_a_clean.mp4")
-O2 = os.path.join(DIR, "clip_b_clean.mp4")
+VIDEO = os.environ.get("SE_TEST_VIDEO") or r"<PROJECT_DIR>\tests\douyin_012.mp4"
+OUTDIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_out")
+J1 = os.path.join(OUTDIR, "batch_a.suberase.json")
+J2 = os.path.join(OUTDIR, "batch_b.suberase.json")
+O1 = os.path.join(OUTDIR, "batch_a_clean.mp4")
+O2 = os.path.join(OUTDIR, "batch_b_clean.mp4")
 
 app = QApplication.instance() or QApplication(sys.argv)
 ok_all = True
@@ -52,36 +52,37 @@ def wait_signal(sig, timeout_ms=600000):
         loop.quit()
 
     sig.connect(on_done)
-    t = QTimer.singleShot(timeout_ms, loop.quit)
+    QTimer.singleShot(timeout_ms, loop.quit)
     loop.exec()
     return res.get("args")
 
 
-def make_project(video: str, w: int, h: int, sec: int, out: str) -> Project:
-    if not os.path.exists(video):
-        gen(video, w=w, h=h, seconds=sec, audio=True)
-    meta = probe(video)
-    p = Project(video=video, meta={"fps": meta.fps}, output=out)
-    p.boxes = [Box(x=int(w * 0.15), y=int(h * 0.75), w=int(w * 0.7), h=int(h * 0.16),
-                   start=0, end=meta.nb_frames - 1)]
+def make_project(path: str, y0: float, y1: float, t0: int, t1: int, out: str) -> str:
+    """同一素材不同字幕带/时段 -> 不同工程。y0/y1 为高度比例。"""
+    meta = probe(VIDEO)
+    p = Project(video=VIDEO, meta={"fps": meta.fps}, output=out)
+    p.boxes = [Box(x=int(meta.width * 0.05), y=int(meta.height * y0),
+                   w=int(meta.width * 0.9), h=int(meta.height * (y1 - y0)),
+                   start=t0, end=t1)]
     p.settings = Settings()
-    return p
+    return p.save(path)
 
 
 def main() -> int:
-    os.makedirs(DIR, exist_ok=True)
-    for f in (O1, O2, default_project_path(V1), default_project_path(V2)):
+    os.makedirs(OUTDIR, exist_ok=True)
+    for f in (O1, O2, J1, J2):
         if os.path.exists(f):
             try:
                 os.remove(f)
             except OSError:
                 pass
+    check("素材存在", os.path.exists(VIDEO), VIDEO)
+    meta = probe(VIDEO)
+    check("素材信息", meta.nb_frames > 100, f"{meta.width}x{meta.height} {meta.nb_frames}帧")
 
-    # 两个不同分辨率/时长的片子，验证 meta 各自 probe
-    p1 = make_project(V1, 1280, 720, 3, O1)
-    p2 = make_project(V2, 960, 540, 2, O2)
-    j1 = p1.save()
-    j2 = p2.save()
+    # 两个工程：不同字幕带 + 不同时段
+    j1 = make_project(J1, 0.47, 0.62, 40, 100, O1)
+    j2 = make_project(J2, 0.47, 0.62, 150, 200, O2)
     check("生成测试工程", os.path.exists(j1) and os.path.exists(j2),
           f"{os.path.basename(j1)}, {os.path.basename(j2)}")
 
@@ -96,21 +97,26 @@ def main() -> int:
     dlg = BatchDialog(engine)
     added = dlg.add_files([j1, j2])
     check("添加工程", added == 2 and len(dlg.items) == 2, f"added={added}")
+    check("输出路径取自工程", dlg.items[0].out == O1 and dlg.items[1].out == O2,
+          f"{dlg.items[0].out}, {dlg.items[1].out}")
 
     dlg.start()
     args = wait_signal(dlg.worker.finished_all)
     summary = args[0] if args else {}
     check("批量完成", summary.get("ok") == 2 and summary.get("fail") == 0, str(summary))
+    check("只擦时段内帧", summary.get("inpainted") == (100 - 40 + 1) + (200 - 150 + 1),
+          f"inpainted={summary.get('inpainted')} 期望=112")
     check("输出 A", os.path.exists(O1) and os.path.getsize(O1) > 1024,
           f"{os.path.getsize(O1)/1024:.0f} KB" if os.path.exists(O1) else "无")
     check("输出 B", os.path.exists(O2) and os.path.getsize(O2) > 1024,
           f"{os.path.getsize(O2)/1024:.0f} KB" if os.path.exists(O2) else "无")
 
-    for src, out in ((V1, O1), (V2, O2)):
+    for out in (O1, O2):
         if os.path.exists(out):
-            m, om = probe(src), probe(out)
+            om = probe(out)
             check(f"帧数一致 {os.path.basename(out)}",
-                  abs(om.nb_frames - m.nb_frames) <= 1, f"{om.nb_frames} vs {m.nb_frames}")
+                  abs(om.nb_frames - meta.nb_frames) <= 1,
+                  f"{om.nb_frames} vs {meta.nb_frames}")
 
     # 断点续跑：再跑一次应全部跳过且不重算
     mt1, mt2 = os.path.getmtime(O1), os.path.getmtime(O2)

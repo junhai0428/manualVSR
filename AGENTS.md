@@ -10,7 +10,7 @@
 |---|---|
 | Python | `<MAIN_ENV>\Scripts\python.exe`（torch 2.6.0+cu124、iopaint 1.6.0、PySide6 6.12、cv2 4.11） |
 | 推理设备 | CUDA 优先，`torch.cuda.mem_get_info()` free > 3GB 才上 GPU，否则回落 CPU 并告警 |
-| 模型缓存 | `<MODEL_DIR>`（`XDG_CACHE_HOME` 必须指向它，否则 torch.hub 与 iopaint 扫描路径错位） |
+| 模型缓存 | `<MAIN_ENV>\models`（`XDG_CACHE_HOME` 必须指向它，否则 torch.hub 与 iopaint 扫描路径错位） |
 | ffmpeg | 全局 PATH，编码走 NVENC |
 | 网络 | 请求本地服务需绕过代理（本项目已内嵌推理，无 HTTP 依赖） |
 

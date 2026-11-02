@@ -65,7 +65,8 @@
 - 只裁字幕带（框合并 + margin 外扩）送进模型，不推理全图 → 显存低、速度快、不破坏画面其它部分
 - IOPaint 以库形式内嵌进程（不走 HTTP），省掉 base64 与网络开销
 
-实测：720p 120 帧全程 13.9s（约 8.6 帧/秒，RTX 3060 12G，NVENC 输出）。
+实测（RTX 3060 12G，NVENC 输出）：竖屏 720x1280、439 帧全片擦除 37.8s（约 11.6 帧/秒）；
+只擦 61 帧的片段 9.6s（其余帧直通）。
 
 ## 参数（右侧面板）
 
@@ -94,11 +95,17 @@
 
 ## 自测
 
+用真实素材 `tests/douyin_012.mp4`（720x1280 竖屏 439 帧）做端到端验证，不依赖自造视频。
+可用环境变量 `SE_TEST_VIDEO` 指定其它素材。
+
 ```
-<MAIN_ENV>\Scripts\python.exe tests/test_smoke.py   # 核心链路（seek 精度、GPU batch、端到端）
-<MAIN_ENV>\Scripts\python.exe tests/test_gui.py     # GUI 全流程（offscreen，模拟拖框/键盘/擦除/过期框回归）
+<MAIN_ENV>\Scripts\python.exe tests/test_smoke.py   # seek精度/引擎batch/端到端擦除
+<MAIN_ENV>\Scripts\python.exe tests/test_gui.py     # GUI 全流程（offscreen 模拟拖框/键盘/擦除）
 <MAIN_ENV>\Scripts\python.exe tests/test_batch.py   # 批量串行 + 断点续跑
 ```
+
+端到端判据（不靠目测）：自动定位素材字幕行 → 擦除后框内**白色文字像素数应归零**
+（实测 8641 → 0），框外差异 ≤ 编码噪声，时段外帧逐帧直通。
 
 ## 已知限制
 

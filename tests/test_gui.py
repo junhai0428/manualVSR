@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
-"""GUI 冒烟测试（offscreen）：打开视频 → 拖框 → 键盘逐帧 → 设出点 → 一键擦除。
+r"""GUI 冒烟测试（offscreen）：打开视频 → 拖框 → 键盘逐帧 → 设出点 → 一键擦除。
 
-运行:  <MAIN_ENV>\\Scripts\\python.exe tests/test_gui.py
+运行:  <MAIN_ENV>\Scripts\python.exe tests/test_gui.py
 """
 from __future__ import annotations
 
@@ -24,10 +24,10 @@ from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox  # noqa: E4
 from src.ui.main_window import MainWindow  # noqa: E402
 from src.project import default_project_path  # noqa: E402
 from src.video_io import probe  # noqa: E402
-from tools.make_test_video import gen  # noqa: E402
 
-VIDEO = r"E:\tmp\suberase_test\test_sub.mp4"
-OUT = r"E:\tmp\suberase_test\gui_out.mp4"
+VIDEO = os.environ.get("SE_TEST_VIDEO") or r"<PROJECT_DIR>\tests\douyin_012.mp4"
+OUTDIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_out")
+OUT = os.path.join(OUTDIR, "gui_out.mp4")
 
 app = QApplication.instance() or QApplication(sys.argv)
 ok_all = True
@@ -58,8 +58,8 @@ def wait_until(pred, timeout_ms=120000, step=100):
 
 
 def main() -> int:
-    if not os.path.exists(VIDEO):
-        gen(VIDEO, seconds=4)
+    os.makedirs(OUTDIR, exist_ok=True)
+    check("素材存在", os.path.exists(VIDEO), VIDEO)
     # 清掉上一轮遗留的工程文件，保证从干净状态开始
     pj = default_project_path(VIDEO)
     if os.path.exists(pj):
@@ -90,8 +90,9 @@ def main() -> int:
     # 模拟拖框（画面下部字幕带）
     r = w.view.view_rect
     check("显示区域有效", r.width() > 10 and r.height() > 10, f"{r.width()}x{r.height()}")
-    p1 = QPoint(r.x() + int(0.15 * r.width()), r.y() + int(0.80 * r.height()))
-    p2 = QPoint(r.x() + int(0.85 * r.width()), r.y() + int(0.95 * r.height()))
+    # 框在字幕带（素材字幕行约在画面 49%-59% 高度）
+    p1 = QPoint(r.x() + int(0.05 * r.width()), r.y() + int(0.46 * r.height()))
+    p2 = QPoint(r.x() + int(0.95 * r.width()), r.y() + int(0.62 * r.height()))
     QTest.mousePress(w.view, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, p1)
     QTest.mouseMove(w.view, p2)
     QTest.mouseRelease(w.view, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, p2)
@@ -100,8 +101,22 @@ def main() -> int:
           str([(b.x, b.y, b.w, b.h, b.start, b.end) for b in w.project.boxes]))
     b = w.project.boxes[0] if w.project.boxes else None
     if b:
-        check("框位于画面下部", b.y > w.meta.height * 0.6, f"y={b.y} h={b.h}")
-        check("新建框时段=当前帧", b.start == 0 and b.end == 0, f"{b.start}-{b.end}")
+        check("框位于字幕带", w.meta.height * 0.40 < b.y < w.meta.height * 0.55, f"y={b.y} h={b.h}")
+        check("新建框=出点未定", b is not None and b.open_end and not b.open_start,
+              b.span_text() if b else "")
+
+    # 用户场景：定完入点后往后拉进度条找出点，框必须还在（虚线延伸到末尾）
+    w.seek(30)
+    app.processEvents()
+    check("seek(30) 仍活跃", b is not None and b.covers(30), f"frame={w.frame_idx}")
+    w.seek(90)
+    app.processEvents()
+    check("往后拉框仍显示(出点未定)", b is not None and b.covers(90) and b.is_open(),
+          f"frame={w.frame_idx} {b.span_text() if b else ''}")
+    QTest.keyClick(w, Qt.Key.Key_O)
+    app.processEvents()
+    check("O 定死出点", b is not None and not b.open_end and b.end == 90
+          and not b.covers(91), b.span_text() if b else "")
 
     # 键盘逐帧
     f0 = w.frame_idx
@@ -123,13 +138,8 @@ def main() -> int:
     check("O 设出点", b is not None and b.end == w.meta.nb_frames - 1,
           f"end={b.end if b else None}")
 
-    # 时间轴拖动
-    w.seek(30)
-    app.processEvents()
-    check("seek 后时段内仍活跃", b is not None and b.covers(30), f"frame={w.frame_idx}")
-
     # 回归：过期框不应再占位，且框内可以新建框
-    b.start, b.end = 0, 20
+    b.start, b.end, b.open_end, b.open_start = 0, 20, False, False
     w.project.boxes = [b]
     w.panel.project = w.project
     w.panel.refresh()

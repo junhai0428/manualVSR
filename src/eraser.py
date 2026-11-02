@@ -24,8 +24,9 @@ def plan_segments(total_frames: int, boxes: List[Box]) -> List[Tuple[int, int, L
         return [(0, total_frames, [])]
     bounds = {0, total_frames}
     for b in active:
-        bounds.add(max(0, min(b.start, total_frames)))
-        bounds.add(max(0, min(b.end + 1, total_frames)))
+        lo, hi = b.span(total_frames)      # 半开放框要展开成真实区间
+        bounds.add(max(0, min(lo, total_frames)))
+        bounds.add(max(0, min(hi + 1, total_frames)))
     pts = sorted(p for p in bounds if 0 <= p <= total_frames)
     segs = []
     for a, b_end in zip(pts[:-1], pts[1:]):

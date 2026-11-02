@@ -72,8 +72,9 @@ class TimelineWidget(QWidget):
 
         # 框区间
         for i, b in enumerate(self.boxes):
-            x1 = self._x_of(b.start)
-            x2 = max(x1 + 2, self._x_of(b.end + 1))
+            lo, hi = b.span(self.total)      # 未定端展开到开头/末尾
+            x1 = self._x_of(lo)
+            x2 = max(x1 + 2, self._x_of(hi + 1))
             col = color_of(i)
             if not b.enabled:
                 col = QColor("#666")
