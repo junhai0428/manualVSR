@@ -115,17 +115,33 @@ def test_plan() -> None:
     crop = merged_crop(boxes, 48, 1280, 720)
     check("crop 区域", crop[2] - crop[0] >= 256 and crop[3] - crop[1] >= 160, str(crop))
 
-    # 半开放框：出点未定 -> 生效到末尾；入点未定 -> 从开头生效
-    ob = Box(x=0, y=0, w=10, h=10, start=40, end=40, open_end=True)
+    # 半开放语义用边界帧号表达（60 帧素材：末帧号=59）
+    ob = Box(x=0, y=0, w=10, h=10, start=40, end=59)      # 出点=末尾
     segs = plan_segments(60, [ob])
-    check("出点未定切分", segs == [(0, 40, []), (40, 60, [ob])],
+    check("出点到末尾切分", segs == [(0, 40, []), (40, 60, [ob])],
           str([(a, b, len(c)) for a, b, c in segs]))
-    check("出点未定 covers", ob.covers(0) is False and ob.covers(59) is True,
-          ob.span_text())
-    hb = Box(x=0, y=0, w=10, h=10, start=40, end=40, open_start=True)
-    check("入点未定 covers", hb.covers(0) is True and hb.covers(59) is False, hb.span_text())
-    check("span 展开", ob.span(60) == (40, 59) and hb.span(60) == (0, 40),
-          f"{ob.span(60)} {hb.span(60)}")
+    check("出点到末尾 covers", ob.covers(0) is False and ob.covers(59) is True,
+          ob.span_text(60))
+    hb = Box(x=0, y=0, w=10, h=10, start=0, end=40)       # 入点=开头
+    check("入点从开头 covers", hb.covers(0) is True and hb.covers(59) is False,
+          hb.span_text(60))
+    check("span/文案", ob.span(60) == (40, 59) and hb.span(60) == (0, 40)
+          and ob.span_text(60) == "40 - 末尾" and hb.span_text(60) == "开头 - 40",
+          f"{ob.span_text(60)} | {hb.span_text(60)}")
+    # 存盘/回读只保留具体帧号，不出现 open_* 标志
+    import json as _json
+    d = _json.loads(_json.dumps(Project(video="v.mp4", boxes=[ob, hb]).to_dict()))
+    check("JSON 只存帧号", all("open_end" not in x and "open_start" not in x
+                              for x in d["boxes"])
+          and d["boxes"][0]["end"] == 59 and d["boxes"][1]["start"] == 0,
+          str([(x["start"], x["end"]) for x in d["boxes"]]))
+    # 旧工程（带 open_* 标志）回读后应展开成真实帧号
+    old = {"version": 1, "video": "v.mp4", "meta": {"nb_frames": 120},
+           "boxes": [{"x": 0, "y": 0, "w": 10, "h": 10, "start": 40, "end": 40,
+                      "open_end": True, "open_start": True}], "settings": {}}
+    p_old = Project.from_dict(old)
+    check("旧工程 open_* 展开", p_old.boxes[0].start == 0 and p_old.boxes[0].end == 119,
+          f"{p_old.boxes[0].start}-{p_old.boxes[0].end}")
 
 
 def test_e2e(m, eng) -> None:

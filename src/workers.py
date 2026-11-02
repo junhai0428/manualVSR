@@ -118,6 +118,7 @@ class BatchWorker(QThread):
                 continue
             try:
                 meta = probe(it.video)
+                it.project.clamp_frames(meta.nb_frames)   # 旧工程展开的哨兵 -> 末帧号
                 self._current = EraseTask(it.project, meta, it.out, self.engine)
                 stats = self._current.run(
                     on_progress=lambda d, t, m: self.task_progress.emit(i, d, t, m)

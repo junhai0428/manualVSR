@@ -144,8 +144,8 @@ class BoxPanel(QWidget):
         self._updating = True
         self.table.setRowCount(len(self.project.boxes))
         for i, b in enumerate(self.project.boxes):
-            lo, hi = b.span(self._nb_frames or (b.end + 1))
-            vals = [str(i + 1), b.span_text(),
+            lo, hi = b.span(self._nb_frames)
+            vals = [str(i + 1), b.span_text(self._nb_frames),
                     f"{b.x},{b.y} {b.w}x{b.h}", str(hi - lo + 1)]
             for c, v in enumerate(vals):
                 it = QTableWidgetItem(v)
@@ -207,29 +207,27 @@ class BoxPanel(QWidget):
         self.boxes_changed.emit()
 
     def _on_start_changed(self, v: int) -> None:
-        """手动改起始帧 = 入点定死。"""
+        """手动改起始帧：入点就写这个数字（0 即代表从开头）。"""
         if self._updating or not self.project:
             return
         b = self.current_box()
         if not b:
             return
         b.start = v
-        b.open_start = False
-        if not b.open_end and b.end < b.start:
+        if b.end < b.start:
             b.end = b.start
         self.refresh()
         self.boxes_changed.emit()
 
     def _on_end_changed(self, v: int) -> None:
-        """手动改结束帧 = 出点定死。"""
+        """手动改结束帧：出点就写这个数字（末帧号即代表到末尾）。"""
         if self._updating or not self.project:
             return
         b = self.current_box()
         if not b:
             return
         b.end = v
-        b.open_end = False
-        if not b.open_start and b.start > b.end:
+        if b.start > b.end:
             b.start = b.end
         self.refresh()
         self.boxes_changed.emit()
@@ -238,8 +236,7 @@ class BoxPanel(QWidget):
         b = self.current_box()
         if b:
             b.start = self.frame_idx
-            b.open_start = False
-            if not b.open_end and b.end < b.start:
+            if b.end < b.start:
                 b.end = b.start
             self.refresh()
             self.boxes_changed.emit()
@@ -248,26 +245,28 @@ class BoxPanel(QWidget):
         b = self.current_box()
         if b:
             b.end = self.frame_idx
-            b.open_end = False
-            if not b.open_start and b.start > b.end:
+            if b.start > b.end:
                 b.start = b.end
             self.refresh()
             self.boxes_changed.emit()
 
     def _set_in_head(self) -> None:
-        """入点未定 -> 从第一帧起生效。"""
+        """入点 = 开头：起始帧写成 0。"""
         b = self.current_box()
         if b:
             b.start = 0
-            b.open_start = True
+            if b.end < b.start:
+                b.end = b.start
             self.refresh()
             self.boxes_changed.emit()
 
     def _set_out_tail(self) -> None:
-        """出点未定 -> 一直生效到最后一帧。"""
+        """出点 = 末尾：结束帧写成末帧号。"""
         b = self.current_box()
         if b:
-            b.open_end = True
+            b.end = max(0, (self._nb_frames or b.end + 1) - 1)
+            if b.start > b.end:
+                b.start = b.end
             self.refresh()
             self.boxes_changed.emit()
 

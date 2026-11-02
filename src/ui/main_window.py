@@ -200,7 +200,11 @@ class MainWindow(QMainWindow):
                     self.lb_status.setText(f"已自动载入工程 {os.path.basename(pjp)}")
             except Exception:
                 pass
+        self.project.clamp_frames(meta.nb_frames)   # 旧工程展开的哨兵 -> 真实末帧号
+        for b in self.project.boxes:
+            b.clamp(meta.width, meta.height, meta.nb_frames)
         self.reader = FrameReader(path, meta)
+        self.view.total_frames = meta.nb_frames
         self.sp_frame.setRange(0, max(0, meta.nb_frames - 1))
         self.sp_frame.setMaximum(max(0, meta.nb_frames - 1))
         self.timeline.set_meta(meta.nb_frames)
@@ -265,8 +269,8 @@ class MainWindow(QMainWindow):
         self._refresh_boxes()
         self.panel.select_box(b.id)
         self.lb_status.setText(
-            f"新增框：入点={self.frame_idx}，出点未定 → 虚线一直生效到末尾；"
-            f"往后找出点后按 O 定死")
+            f"新增框：入点={self.frame_idx}，出点=末帧 {b.end}（虚线）；"
+            f"往后找出点后按 O 改成当前帧")
 
     def _on_boxes_changed(self) -> None:
         self.dirty = True

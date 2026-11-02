@@ -102,8 +102,11 @@ def main() -> int:
     b = w.project.boxes[0] if w.project.boxes else None
     if b:
         check("框位于字幕带", w.meta.height * 0.40 < b.y < w.meta.height * 0.55, f"y={b.y} h={b.h}")
-        check("新建框=出点未定", b is not None and b.open_end and not b.open_start,
-              b.span_text() if b else "")
+        check("新建框出点=末帧号", b is not None and b.end == w.meta.nb_frames - 1,
+              b.span_text(w.meta.nb_frames) if b else "")
+        # 在第 0 帧建框时 start=0 且 end=末帧号 -> 显示「全片」（半开放 = 虚线）
+        check("半开放框=虚线", b is not None and b.is_open(w.meta.nb_frames),
+              b.span_text(w.meta.nb_frames) if b else "")
 
     # 用户场景：定完入点后往后拉进度条找出点，框必须还在（虚线延伸到末尾）
     w.seek(30)
@@ -111,12 +114,13 @@ def main() -> int:
     check("seek(30) 仍活跃", b is not None and b.covers(30), f"frame={w.frame_idx}")
     w.seek(90)
     app.processEvents()
-    check("往后拉框仍显示(出点未定)", b is not None and b.covers(90) and b.is_open(),
-          f"frame={w.frame_idx} {b.span_text() if b else ''}")
+    check("往后拉框仍显示(出点到末尾)", b is not None and b.covers(90)
+          and b.is_open(w.meta.nb_frames),
+          f"frame={w.frame_idx} {b.span_text(w.meta.nb_frames) if b else ''}")
     QTest.keyClick(w, Qt.Key.Key_O)
     app.processEvents()
-    check("O 定死出点", b is not None and not b.open_end and b.end == 90
-          and not b.covers(91), b.span_text() if b else "")
+    check("O 定死出点", b is not None and b.end == 90 and not b.covers(91),
+          b.span_text(w.meta.nb_frames) if b else "")
 
     # 键盘逐帧
     f0 = w.frame_idx
@@ -139,7 +143,7 @@ def main() -> int:
           f"end={b.end if b else None}")
 
     # 回归：过期框不应再占位，且框内可以新建框
-    b.start, b.end, b.open_end, b.open_start = 0, 20, False, False
+    b.start, b.end = 0, 20
     w.project.boxes = [b]
     w.panel.project = w.project
     w.panel.refresh()
@@ -155,7 +159,10 @@ def main() -> int:
     check("过期框内可新建框", len(w.project.boxes) == 2,
           str([(x.start, x.end) for x in w.project.boxes]))
     check("原框未被拖动", (b.start, b.end) == (0, 20), f"{b.start}-{b.end}")
-    check("新框时段=当前帧", w.project.boxes[1].start == 60 and w.project.boxes[1].end == 60)
+    check("新框入点=当前帧/出点=末帧",
+          w.project.boxes[1].start == 60
+          and w.project.boxes[1].end == w.meta.nb_frames - 1,
+          f"{w.project.boxes[1].start}-{w.project.boxes[1].end}")
     # Esc 清除选中
     QTest.keyClick(w, Qt.Key.Key_Escape)
     app.processEvents()

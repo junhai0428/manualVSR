@@ -12,13 +12,17 @@ PROJECT_VERSION = 1
 PROJECT_EXT = ".suberase.json"
 
 
+END_OPEN = 10 ** 9      # 哨兵：出点未定，加载工程后由 clamp 夹成真实末帧号
+
+
 @dataclass
 class Box:
-    """坐标系：源视频原始像素。start/end 为闭区间帧号。
+    """坐标系：源视频原始像素。start/end 为闭区间帧号（存盘就是具体数字）。
 
-    open_end=True  : 出点未定，时段从 start 延伸到末尾（新建框的默认状态）
-    open_start=True: 入点未定，时段从开头延伸到 end
-    两个都为 True 即全片生效。
+    半开放语义直接用边界值表达，不额外存标志位：
+      start == 0        -> 从开头生效（列表显示「开头」）
+      end  == 末帧号    -> 一直生效到末尾（列表显示「末尾」）
+    新建框默认 end = 末帧号，即出点未定；按 O 后写成当前帧号。
     """
     x: int
     y: int
@@ -28,8 +32,6 @@ class Box:
     end: int
     enabled: bool = True
     label: str = ""
-    open_end: bool = False
-    open_start: bool = False
     id: str = field(default_factory=lambda: uuid.uuid4().hex[:8])
 
     @property
@@ -37,37 +39,35 @@ class Box:
         return (self.x, self.y, self.w, self.h)
 
     def covers(self, frame: int) -> bool:
-        if not self.enabled:
-            return False
-        lo = 0 if self.open_start else self.start
-        hi = 10 ** 9 if self.open_end else self.end
-        return lo <= frame <= hi
+        return self.enabled and self.start <= frame <= self.end
 
     def clamp(self, width: int, height: int, nb_frames: int) -> None:
         self.x = max(0, min(self.x, width - 1))
         self.y = max(0, min(self.y, height - 1))
         self.w = max(1, min(self.w, width - self.x))
         self.h = max(1, min(self.h, height - self.y))
-        self.start = max(0, min(self.start, nb_frames - 1))
-        self.end = max(self.start, min(self.end, nb_frames - 1))
+        self.start = max(0, min(self.start, max(0, nb_frames - 1)))
+        self.end = max(self.start, min(self.end, max(0, nb_frames - 1)))
 
     # ---- 显示/查询辅助 ----
-    def is_open(self) -> bool:
-        """任一端未定 = 半开放框（虚线显示）。"""
-        return self.open_start or self.open_end
+    def is_open(self, nb_frames: int = 0) -> bool:
+        """有一端贴在开头/末尾 = 半开放（虚线显示）。"""
+        return self.start <= 0 or (nb_frames > 0 and self.end >= nb_frames - 1)
 
-    def span(self, nb_frames: int) -> tuple:
-        """实际生效的帧区间（含未定端的展开）。"""
-        lo = 0 if self.open_start else self.start
-        hi = max(0, nb_frames - 1) if self.open_end else self.end
-        return lo, hi
+    def span(self, nb_frames: int = 0) -> tuple:
+        """实际生效区间（夹到视频范围内）。"""
+        lo = max(0, self.start)
+        hi = min(self.end, nb_frames - 1) if nb_frames > 0 else self.end
+        return lo, max(lo, hi)
 
-    def span_text(self) -> str:
-        if self.open_start and self.open_end:
+    def span_text(self, nb_frames: int = 0) -> str:
+        at_head = self.start <= 0
+        at_tail = nb_frames > 0 and self.end >= nb_frames - 1
+        if at_head and at_tail:
             return "全片"
-        if self.open_start:
+        if at_head:
             return f"开头 - {self.end}"
-        if self.open_end:
+        if at_tail:
             return f"{self.start} - 末尾"
         return f"{self.start} - {self.end}"
 
@@ -109,6 +109,13 @@ class Project:
     def need_process(self) -> bool:
         return any(b.enabled for b in self.boxes)
 
+    def clamp_frames(self, nb_frames: int) -> None:
+        """把帧号夹进视频范围（含旧工程展开出的哨兵值）。"""
+        last = max(0, nb_frames - 1)
+        for b in self.boxes:
+            b.start = max(0, min(b.start, last))
+            b.end = max(b.start, min(b.end, last))
+
     def to_dict(self) -> dict:
         return {
             "version": self.version,
@@ -129,18 +136,25 @@ class Project:
         p.boxes = []
         for b in d.get("boxes", []) or []:
             try:
+                start, end = int(b["start"]), int(b["end"])
+                # 兼容旧工程（曾用 open_start/open_end 标志）：展开成边界帧号
+                if b.get("open_start"):
+                    start = 0
+                if b.get("open_end"):
+                    end = END_OPEN      # 稍后由 clamp_frames/clamp 夹成真实末帧号
                 box = Box(
                     x=int(b["x"]), y=int(b["y"]), w=int(b["w"]), h=int(b["h"]),
-                    start=int(b["start"]), end=int(b["end"]),
+                    start=start, end=end,
                     enabled=bool(b.get("enabled", True)),
                     label=str(b.get("label", "")),
-                    open_end=bool(b.get("open_end", False)),
-                    open_start=bool(b.get("open_start", False)),
                     id=str(b.get("id") or uuid.uuid4().hex[:8]),
                 )
                 p.boxes.append(box)
             except (KeyError, ValueError, TypeError):
                 continue
+        nb = int(p.meta.get("nb_frames") or 0)
+        if nb > 0:
+            p.clamp_frames(nb)
         s = d.get("settings", {}) or {}
         p.settings = Settings(**{k: v for k, v in s.items() if k in Settings.__dataclass_fields__})
         return p

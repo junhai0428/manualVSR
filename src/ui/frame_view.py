@@ -46,6 +46,7 @@ class FrameView(QWidget):
         self.selected_id: Optional[str] = None
         self.preview_mask = False
         self.show_inactive = False   # 是否显示当前帧不生效的框
+        self.total_frames = 0        # 视频总帧数（判断框是否贴到末尾）
 
         self.mode = self.MODE_NONE
         self._start = QPoint()
@@ -195,10 +196,11 @@ class FrameView(QWidget):
             if r is not None and r.width() > 4 and r.height() > 4:
                 p1 = self.to_video(r.topLeft())
                 p2 = self.to_video(r.bottomRight())
-                # 出点未定：从当前帧一直生效到末尾（虚线），按 O 再定出点
+                # 出点未定：end 直接写末帧号（虚线），按 O 再改成当前帧
+                last = max(self.frame_idx, (self.total_frames or self.frame_idx + 1) - 1)
                 b = Box(x=max(0, p1.x()), y=max(0, p1.y()),
                         w=max(4, p2.x() - p1.x()), h=max(4, p2.y() - p1.y()),
-                        start=self.frame_idx, end=self.frame_idx, open_end=True)
+                        start=self.frame_idx, end=last)
                 self.selected_id = b.id
                 self.box_created.emit(b)
                 self.selection_changed.emit(b)
@@ -237,8 +239,8 @@ class FrameView(QWidget):
             if not active:
                 col.setAlpha(130 if sel else 80)
             pen = QPen(col, 2 if sel else 1)
-            # 实线=两端已定；虚线=有未定端(延伸到开头/末尾) 或 当前帧不生效
-            solid = active and not b.is_open()
+            # 实线=两端已定；虚线=贴着开头/末尾 或 当前帧不生效
+            solid = active and not b.is_open(self.total_frames)
             pen.setStyle(Qt.PenStyle.SolidLine if solid else Qt.PenStyle.DashLine)
             p.setPen(pen)
             r = self.box_rect_widget(b)
@@ -253,7 +255,7 @@ class FrameView(QWidget):
                 f = QFont()
                 f.setPointSize(8)
                 p.setFont(f)
-                tag = f"#{i+1} {b.span_text()}" + ("" if active else " (不在当前帧)")
+                tag = f"#{i+1} {b.span_text(self.total_frames)}" + ("" if active else " (不在当前帧)")
                 p.drawText(r.topLeft().x(), max(10, r.topLeft().y() - 4), tag)
 
         if self._temp_rect:
