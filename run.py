@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""入口：先设置缓存/线程环境变量（必须在 import torch 之前），再启动 GUI。
+r"""入口：先设置缓存/线程环境变量（必须在 import torch 之前），再启动 GUI。
 
 用法:  <MAIN_ENV>\Scripts\python.exe run.py
 """
