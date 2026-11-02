@@ -146,6 +146,8 @@ class MainWindow(QMainWindow):
             (K.Key_Space, self.toggle_play),
             (K.Key_I, self._set_in),
             (K.Key_O, self._set_out),
+            (K.Key_BracketLeft, self._set_in_head),      # [ = 入点设为开头(第0帧)
+            (K.Key_BracketRight, self._set_out_tail),    # ] = 出点设为末尾(末帧)
             (K.Key_Delete, self._delete_selected),
             (K.Key_Escape, lambda: self._on_select(None)),
             (QKeySequence("Ctrl+S"), self.save_project),
@@ -302,6 +304,12 @@ class MainWindow(QMainWindow):
 
     def _set_out(self) -> None:
         self.panel._set_out()
+
+    def _set_in_head(self) -> None:
+        self.panel._set_in_head()
+
+    def _set_out_tail(self) -> None:
+        self.panel._set_out_tail()
 
     # ---------------- 工程 ----------------
     def save_project(self) -> None:

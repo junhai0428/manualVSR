@@ -122,6 +122,20 @@ def main() -> int:
     check("O 定死出点", b is not None and b.end == 90 and not b.covers(91),
           b.span_text(w.meta.nb_frames) if b else "")
 
+    # 新增快捷键：[ = 入点设到开头(0)，] = 出点设到末尾(末帧号)
+    QTest.keyClick(w, Qt.Key.Key_I)
+    app.processEvents()
+    check("I 定入点", b.start == 90, b.span_text(w.meta.nb_frames))
+    QTest.keyClick(w, Qt.Key.Key_BracketLeft)
+    app.processEvents()
+    check("[ 入点=开头", b.start == 0, b.span_text(w.meta.nb_frames))
+    QTest.keyClick(w, Qt.Key.Key_BracketRight)
+    app.processEvents()
+    check("] 出点=末尾", b.end == w.meta.nb_frames - 1, b.span_text(w.meta.nb_frames))
+    # 复原出点，后续用例依赖 0-90
+    QTest.keyClick(w, Qt.Key.Key_O)
+    app.processEvents()
+
     # 键盘逐帧
     f0 = w.frame_idx
     QTest.keyClick(w, Qt.Key.Key_Right)
