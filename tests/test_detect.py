@@ -216,6 +216,9 @@ def test_real_material() -> None:
           f"{len(result.get('boxes', []))} 框 / providers={result.get('providers')}")
     check("检测跑在 GPU", "CUDAExecutionProvider" in result.get("providers", []),
           str(result.get("providers")))
+    check("阈值参数随结果返回", result.get("thresh") == 0.3
+          and result.get("box_thresh") == 0.5,
+          f"thresh={result.get('thresh')} box_thresh={result.get('box_thresh')}")
     check("进度回调有输出", len(frames) > 0, f"{len(frames)} 次进度")
 
     nb = int(result.get("nb_frames") or 0)

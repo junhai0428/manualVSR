@@ -176,7 +176,7 @@ def clusters_to_boxes(clusters: List[Dict], step: int, margin: int,
 # ---------------- 主流程 ----------------
 def detect(video: str, step_sec: float = 0.5, iou_thr: float = 0.3,
            margin: int = 8, out_path: Optional[str] = None,
-           on_progress=None) -> Dict:
+           on_progress=None, thresh: float = 0.3, box_thresh: float = 0.5) -> Dict:
     from rapidocr_onnxruntime import RapidOCR
 
     meta = ffprobe_meta(video)
@@ -185,6 +185,9 @@ def detect(video: str, step_sec: float = 0.5, iou_thr: float = 0.3,
     step = max(1, int(round(fps * step_sec)))
 
     engine = RapidOCR(det_use_cuda=True, cls_use_cuda=True, rec_use_cuda=True)
+    # DBNet 后处理阈值（不支持 per-call，这里按实例覆盖）
+    engine.text_det.postprocess_op.thresh = thresh
+    engine.text_det.postprocess_op.box_thresh = box_thresh
     providers = list(engine.text_det.infer.session.get_providers())
 
     dets: List[Dict] = []
@@ -211,6 +214,7 @@ def detect(video: str, step_sec: float = 0.5, iou_thr: float = 0.3,
               "nb_frames": nb_frames, "nb_frames_exact": meta["nb_frames_exact"],
               "width": w, "height": h, "step_frames": step,
               "sampled": n_sampled, "providers": providers,
+              "thresh": thresh, "box_thresh": box_thresh,
               "det_seconds": det_seconds, "boxes": boxes}
     if out_path:
         with open(out_path, "w", encoding="utf-8") as f:
@@ -224,6 +228,10 @@ def main() -> int:
     ap.add_argument("--step-sec", type=float, default=0.5, help="抽帧间隔秒")
     ap.add_argument("--iou", type=float, default=0.3, help="合并 IoU 阈值")
     ap.add_argument("--margin", type=int, default=8, help="框外扩像素")
+    ap.add_argument("--thresh", type=float, default=0.3,
+                    help="DBNet 概率图二值化阈值（小=框更松更全）")
+    ap.add_argument("--box-thresh", dest="box_thresh", type=float, default=0.5,
+                    help="候选框整体置信度门槛（小=保留更多弱候选）")
     ap.add_argument("--out", default=None, help="输出 JSON 路径")
     ap.add_argument("--progress", action="store_true", help="stderr 输出进度")
     args = ap.parse_args()
@@ -232,7 +240,8 @@ def main() -> int:
         print(f"PROGRESS {frame_no}", file=sys.stderr, flush=True)
 
     r = detect(args.video, args.step_sec, args.iou, args.margin, args.out,
-               on_progress=prog if args.progress else None)
+               on_progress=prog if args.progress else None,
+               thresh=args.thresh, box_thresh=args.box_thresh)
     print(json.dumps({
         "providers": r["providers"], "det_seconds": r["det_seconds"],
         "sampled": r["sampled"], "boxes": len(r["boxes"]),

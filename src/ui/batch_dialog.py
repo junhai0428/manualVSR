@@ -145,12 +145,13 @@ class BatchDialog(QDialog):
         dlg = DetectParamsDialog(self)
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
-        step, iou, margin = dlg.values()
+        step, iou, margin, thresh, box_thr = dlg.values()
         self._set_running(True)
         self.progress.setRange(0, len(paths))
         self.progress.setValue(0)
         self.lb_status.setText(f"自动生成工程中…（0/{len(paths)}）")
-        self.gen_worker = GenerateWorker(paths, step, iou, margin, self)
+        self.gen_worker = GenerateWorker(paths, step, iou, margin,
+                                         thresh, box_thr, self)
         self.gen_worker.item_started.connect(self._on_gen_started)
         self.gen_worker.item_done.connect(self._on_gen_done)
         self.gen_worker.item_skipped.connect(self._on_gen_skipped)

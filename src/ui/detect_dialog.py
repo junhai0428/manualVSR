@@ -34,6 +34,20 @@ class DetectParamsDialog(QDialog):
         self.sp_margin.setToolTip("检测框向外扩展，避免贴字太紧擦不干净")
         form.addRow("外扩边距", self.sp_margin)
 
+        self.sp_thresh = QDoubleSpinBox()
+        self.sp_thresh.setRange(0.05, 0.9)
+        self.sp_thresh.setSingleStep(0.05)
+        self.sp_thresh.setValue(0.3)
+        self.sp_thresh.setToolTip("DBNet 概率图二值化阈值：调小框更松更全（能框住浅色/模糊字），调大框更紧更准")
+        form.addRow("二值化阈值 thresh", self.sp_thresh)
+
+        self.sp_box = QDoubleSpinBox()
+        self.sp_box.setRange(0.1, 0.9)
+        self.sp_box.setSingleStep(0.05)
+        self.sp_box.setValue(0.5)
+        self.sp_box.setToolTip("候选框整体置信度门槛：调小保留更多弱候选（漏检少但碎框多），调大只留高置信度")
+        form.addRow("置信度门槛 box_thresh", self.sp_box)
+
         bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok |
                               QDialogButtonBox.StandardButton.Cancel)
         bb.accepted.connect(self.accept)
@@ -41,4 +55,5 @@ class DetectParamsDialog(QDialog):
         form.addRow(bb)
 
     def values(self) -> tuple:
-        return (self.sp_step.value(), self.sp_iou.value(), self.sp_margin.value())
+        return (self.sp_step.value(), self.sp_iou.value(), self.sp_margin.value(),
+                self.sp_thresh.value(), self.sp_box.value())
