@@ -56,6 +56,14 @@ class DetectParamsDialog(QDialog):
                                "调大=误检更少（杀误检主手段），调小=框更多")
         form.addRow("识别过滤分数", self.sp_rec)
 
+        self.sp_minh = QSpinBox()
+        self.sp_minh.setRange(0, 200)
+        self.sp_minh.setValue(20)
+        self.sp_minh.setSuffix(" px")
+        self.sp_minh.setToolTip("最小文字高度：检测框高度低于它的一律丢弃，"
+                                "用于过滤商品包装/衣服上的小字（0=不过滤）")
+        form.addRow("最小文字高度", self.sp_minh)
+
         bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok |
                               QDialogButtonBox.StandardButton.Cancel)
         bb.accepted.connect(self.accept)
@@ -64,4 +72,5 @@ class DetectParamsDialog(QDialog):
 
     def values(self) -> tuple:
         return (self.sp_step.value(), self.sp_iou.value(), self.sp_margin.value(),
-                self.sp_thresh.value(), self.sp_box.value(), self.sp_rec.value())
+                self.sp_thresh.value(), self.sp_box.value(), self.sp_rec.value(),
+                self.sp_minh.value())
