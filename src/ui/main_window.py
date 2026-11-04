@@ -10,16 +10,17 @@ from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QKeySequence, QShortcut
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
                                QFileDialog, QPushButton, QLabel, QSpinBox, QMessageBox,
-                               QProgressBar, QStatusBar, QToolBar, QFrame)
+                               QProgressBar, QStatusBar, QToolBar, QFrame, QDialog)
 
 from ..project import Project, Box, Settings, default_project_path, default_output_path
 from ..video_io import probe, FrameReader, VideoMeta, VideoIOError
-from ..workers import EngineLoader, EraseWorker
+from ..workers import EngineLoader, EraseWorker, DetectWorker
 from ..inpaint_engine import InpaintEngine
 from .frame_view import FrameView
 from .timeline import TimelineWidget
 from .box_panel import BoxPanel
 from .batch_dialog import BatchDialog
+from .detect_dialog import DetectParamsDialog
 
 
 class MainWindow(QMainWindow):
@@ -33,6 +34,7 @@ class MainWindow(QMainWindow):
         self.reader: Optional[FrameReader] = None
         self.engine: Optional[InpaintEngine] = None
         self.worker: Optional[EraseWorker] = None
+        self.detect_worker: Optional[DetectWorker] = None
         self.frame_idx = 0
         self.dirty = False
         self._play_timer = QTimer(self)
@@ -57,6 +59,9 @@ class MainWindow(QMainWindow):
         self.act_cancel.triggered.connect(self.cancel_erase)
         self.act_batch = QAction("批量擦除 (Ctrl+B)", self)
         self.act_batch.triggered.connect(self.open_batch)
+        self.act_detect = QAction("自动检测框", self)
+        self.act_detect.setToolTip("OCR 自动找出文字区域，生成擦除框（可再手动调整）")
+        self.act_detect.triggered.connect(self.auto_detect)
         self.act_ghost = QAction("显示非活跃框", self)
         self.act_ghost.setCheckable(True)
         self.act_ghost.setChecked(False)
@@ -68,6 +73,7 @@ class MainWindow(QMainWindow):
         tb.addAction(self.act_erase)
         tb.addAction(self.act_cancel)
         tb.addSeparator()
+        tb.addAction(self.act_detect)
         tb.addAction(self.act_batch)
         tb.addAction(self.act_ghost)
 
@@ -404,6 +410,54 @@ class MainWindow(QMainWindow):
     def open_batch(self) -> None:
         dlg = BatchDialog(self.engine, self)
         dlg.exec()
+
+    # ---------------- 自动检测 ----------------
+    def auto_detect(self) -> None:
+        if not self.meta:
+            QMessageBox.information(self, "提示", "先打开一个视频")
+            return
+        if self.detect_worker and self.detect_worker.isRunning():
+            return
+        dlg = DetectParamsDialog(self)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        step, iou, margin = dlg.values()
+        self.act_detect.setEnabled(False)
+        self.act_erase.setEnabled(False)
+        self.progress.setRange(0, self.meta.nb_frames - 1)
+        self.progress.setVisible(True)
+        self.progress.setValue(0)
+        self.lb_status.setText("自动检测中…（OCR GPU）")
+        self.detect_worker = DetectWorker(self.project.video, step, iou, margin, self)
+        self.detect_worker.progress.connect(self._on_detect_progress)
+        self.detect_worker.finished_ok.connect(self._on_detect_done)
+        self.detect_worker.failed.connect(self._on_detect_failed)
+        self.detect_worker.start()
+
+    def _on_detect_progress(self, frame_no: int) -> None:
+        self.progress.setValue(min(frame_no, self.progress.maximum()))
+
+    def _on_detect_done(self, boxes: list, summary: str) -> None:
+        self._on_detect_ui_reset()
+        if not boxes:
+            self.lb_status.setText("自动检测完成：未发现文字区域")
+            return
+        for b in boxes:
+            b.clamp(self.meta.width, self.meta.height, self.meta.nb_frames)
+            self.project.add_box(b)
+        self.dirty = True
+        self._refresh_boxes()
+        self.lb_status.setText(f"自动检测完成：新增 {len(boxes)} 个框 · {summary}")
+
+    def _on_detect_failed(self, err: str) -> None:
+        self._on_detect_ui_reset()
+        QMessageBox.critical(self, "自动检测失败", err)
+        self.lb_status.setText(f"检测失败: {err}")
+
+    def _on_detect_ui_reset(self) -> None:
+        self.act_detect.setEnabled(True)
+        self.act_erase.setEnabled(True)
+        self.progress.setVisible(False)
 
     def closeEvent(self, e) -> None:
         self._play_timer.stop()

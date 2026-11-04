@@ -11,9 +11,10 @@ from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QTableWidget,
                                QCheckBox, QLabel, QMessageBox, QFileDialog,
                                QHeaderView, QProgressBar, QGroupBox)
 
-from ..project import Project, default_output_path
+from ..project import Project, default_output_path, default_project_path
 from ..inpaint_engine import InpaintEngine
-from ..workers import BatchItem, BatchWorker
+from ..workers import BatchItem, BatchWorker, GenerateWorker
+from .detect_dialog import DetectParamsDialog
 
 
 class BatchDialog(QDialog):
@@ -24,6 +25,7 @@ class BatchDialog(QDialog):
         self.engine = engine
         self.items: List[BatchItem] = []
         self.worker: Optional[BatchWorker] = None
+        self.gen_worker: Optional[GenerateWorker] = None
 
         root = QVBoxLayout(self)
         tip = QLabel("选择一个或多个工程 json（视频同目录的 *.suberase.json）。"
@@ -52,6 +54,13 @@ class BatchDialog(QDialog):
         row = QHBoxLayout()
         self.btn_add = QPushButton("添加工程…")
         self.btn_add.clicked.connect(self.add_files_dialog)
+        self.btn_gen = QPushButton("自动生成工程…")
+        self.btn_gen.setToolTip("选择多个视频，OCR 自动检测文字区域并保存为工程 json"
+                                "（同目录同名工程已存在则跳过）")
+        self.btn_gen.clicked.connect(self.generate_projects)
+        self.btn_gen_cancel = QPushButton("停止生成")
+        self.btn_gen_cancel.setEnabled(False)
+        self.btn_gen_cancel.clicked.connect(self.cancel_generate)
         self.btn_remove = QPushButton("移除选中")
         self.btn_remove.clicked.connect(self.remove_selected)
         self.btn_clear = QPushButton("清空")
@@ -63,8 +72,8 @@ class BatchDialog(QDialog):
         self.btn_cancel.clicked.connect(self.cancel)
         self.btn_close = QPushButton("关闭")
         self.btn_close.clicked.connect(self.reject)
-        for w in (self.btn_add, self.btn_remove, self.btn_clear, self.btn_start,
-                  self.btn_cancel, self.btn_close):
+        for w in (self.btn_add, self.btn_gen, self.btn_gen_cancel, self.btn_remove,
+                  self.btn_clear, self.btn_start, self.btn_cancel, self.btn_close):
             row.addWidget(w)
         root.addLayout(row)
 
@@ -125,6 +134,68 @@ class BatchDialog(QDialog):
                 self.table.setItem(i, c, item)
 
     # ---------- 执行 ----------
+    def generate_projects(self) -> None:
+        if self.gen_worker and self.gen_worker.isRunning():
+            return
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, "选择视频（将逐个自动检测并生成工程 json）", "",
+            "视频 (*.mp4 *.mov *.mkv *.avi *.flv *.wmv *.webm);;所有文件 (*.*)")
+        if not paths:
+            return
+        dlg = DetectParamsDialog(self)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        step, iou, margin = dlg.values()
+        self._set_running(True)
+        self.progress.setRange(0, len(paths))
+        self.progress.setValue(0)
+        self.lb_status.setText(f"自动生成工程中…（0/{len(paths)}）")
+        self.gen_worker = GenerateWorker(paths, step, iou, margin, self)
+        self.gen_worker.item_started.connect(self._on_gen_started)
+        self.gen_worker.item_done.connect(self._on_gen_done)
+        self.gen_worker.item_skipped.connect(self._on_gen_skipped)
+        self.gen_worker.item_failed.connect(self._on_gen_failed)
+        self.gen_worker.finished_all.connect(self._on_gen_all_done)
+        self.gen_worker.start()
+
+    def cancel_generate(self) -> None:
+        if self.gen_worker:
+            self.gen_worker.cancel()
+            self.lb_status.setText("停止生成：跑完当前视频后停止")
+
+    def _set_running(self, running: bool) -> None:
+        for w in (self.btn_add, self.btn_gen, self.btn_remove, self.btn_clear,
+                  self.btn_start, self.btn_close):
+            w.setEnabled(not running)
+        self.btn_gen_cancel.setEnabled(running)
+        self.btn_cancel.setEnabled(running)
+        self.ck_skip.setEnabled(not running)
+
+    def _on_gen_started(self, idx: int, name: str) -> None:
+        self.lb_status.setText(f"[{idx + 1}] 检测中: {name}")
+
+    def _on_gen_done(self, idx: int, pj_path: str, n_boxes: int) -> None:
+        self.progress.setValue(idx + 1)
+        self.lb_status.setText(
+            f"[{idx + 1}] 已生成 {os.path.basename(pj_path)}（{n_boxes} 个框）")
+
+    def _on_gen_skipped(self, idx: int, reason: str) -> None:
+        self.progress.setValue(idx + 1)
+        self.lb_status.setText(f"[{idx + 1}] 跳过: {reason}")
+
+    def _on_gen_failed(self, idx: int, err: str) -> None:
+        self.progress.setValue(idx + 1)
+        self.lb_status.setText(f"[{idx + 1}] 失败: {err[:120]}")
+
+    def _on_gen_all_done(self, summary: dict) -> None:
+        self.progress.setRange(0, 100)
+        self.progress.setValue(100)
+        self._set_running(False)
+        msg = (f"生成 {summary['ok']} · 跳过 {summary['skip']} · 失败 {summary['fail']}\n"
+               f"共生成 {summary['boxes']} 个框")
+        self.lb_status.setText(msg.replace("\n", " | "))
+        QMessageBox.information(self, "生成完成", msg)
+
     def start(self) -> None:
         if self.engine is None:
             QMessageBox.information(self, "提示", "模型还没加载完，请稍候")
@@ -148,7 +219,8 @@ class BatchDialog(QDialog):
             self.lb_status.setText("取消中：跑完当前任务后停止")
 
     def set_running(self, running: bool) -> None:
-        for w in (self.btn_add, self.btn_remove, self.btn_clear, self.btn_start, self.btn_close):
+        for w in (self.btn_add, self.btn_gen, self.btn_remove, self.btn_clear,
+                  self.btn_start, self.btn_close):
             w.setEnabled(not running)
         self.btn_cancel.setEnabled(running)
         self.ck_skip.setEnabled(not running)
@@ -189,12 +261,18 @@ class BatchDialog(QDialog):
         QMessageBox.information(self, "批量完成", msg)
 
     def closeEvent(self, e) -> None:
-        if self.worker and self.worker.isRunning():
+        running = (self.worker and self.worker.isRunning()) or \
+                  (self.gen_worker and self.gen_worker.isRunning())
+        if running:
             r = QMessageBox.question(self, "正在运行", "任务还在跑，确定关闭？（会先停止）",
                                      QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
             if r != QMessageBox.StandardButton.Yes:
                 e.ignore()
                 return
-            self.worker.cancel()
-            self.worker.wait(20000)
+            if self.worker and self.worker.isRunning():
+                self.worker.cancel()
+                self.worker.wait(20000)
+            if self.gen_worker and self.gen_worker.isRunning():
+                self.gen_worker.cancel()
+                self.gen_worker.wait(20000)
         super().closeEvent(e)
