@@ -176,7 +176,8 @@ def clusters_to_boxes(clusters: List[Dict], step: int, margin: int,
 # ---------------- 主流程 ----------------
 def detect(video: str, step_sec: float = 0.5, iou_thr: float = 0.3,
            margin: int = 8, out_path: Optional[str] = None,
-           on_progress=None, thresh: float = 0.3, box_thresh: float = 0.5) -> Dict:
+           on_progress=None, thresh: float = 0.3, box_thresh: float = 0.5,
+           rec_score: float = 0.55) -> Dict:
     from rapidocr_onnxruntime import RapidOCR
 
     meta = ffprobe_meta(video)
@@ -195,15 +196,19 @@ def detect(video: str, step_sec: float = 0.5, iou_thr: float = 0.3,
     n_sampled = 0
     for frame_no, img in iter_sampled_frames(
             video, step, w, h, on_progress, nb_frames):
-        res, _ = engine(img, use_det=True, use_cls=False, use_rec=False)
+        # det + rec：每个候选框跑文字识别，认不出字/置信度低的丢弃（杀误检）
+        res, _ = engine(img, use_det=True, use_cls=False, use_rec=True,
+                        text_score=rec_score)
         n_sampled += 1
         if not res:
             continue
-        for points in res:
+        for entry in res:
+            points, text, score = entry[0], entry[1], float(entry[2])
             r = rect_of(points)
             if r[2] < 4 or r[3] < 4:        # 过滤碎块
                 continue
-            dets.append({"frame": frame_no, "rect": r})
+            dets.append({"frame": frame_no, "rect": r,
+                         "text": text, "score": score})
     det_seconds = round(time.time() - t0, 2)
 
     gap = step * 2
@@ -214,7 +219,7 @@ def detect(video: str, step_sec: float = 0.5, iou_thr: float = 0.3,
               "nb_frames": nb_frames, "nb_frames_exact": meta["nb_frames_exact"],
               "width": w, "height": h, "step_frames": step,
               "sampled": n_sampled, "providers": providers,
-              "thresh": thresh, "box_thresh": box_thresh,
+              "thresh": thresh, "box_thresh": box_thresh, "rec_score": rec_score,
               "det_seconds": det_seconds, "boxes": boxes}
     if out_path:
         with open(out_path, "w", encoding="utf-8") as f:
@@ -232,6 +237,8 @@ def main() -> int:
                     help="DBNet 概率图二值化阈值（小=框更松更全）")
     ap.add_argument("--box-thresh", dest="box_thresh", type=float, default=0.5,
                     help="候选框整体置信度门槛（小=保留更多弱候选）")
+    ap.add_argument("--rec-score", type=float, default=0.55,
+                    help="OCR 识别过滤分数：识别置信度低于它的一律丢弃（杀误检主手段）")
     ap.add_argument("--out", default=None, help="输出 JSON 路径")
     ap.add_argument("--progress", action="store_true", help="stderr 输出进度")
     args = ap.parse_args()
@@ -241,7 +248,8 @@ def main() -> int:
 
     r = detect(args.video, args.step_sec, args.iou, args.margin, args.out,
                on_progress=prog if args.progress else None,
-               thresh=args.thresh, box_thresh=args.box_thresh)
+               thresh=args.thresh, box_thresh=args.box_thresh,
+               rec_score=args.rec_score)
     print(json.dumps({
         "providers": r["providers"], "det_seconds": r["det_seconds"],
         "sampled": r["sampled"], "boxes": len(r["boxes"]),
