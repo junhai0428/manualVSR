@@ -177,8 +177,8 @@ def clusters_to_boxes(clusters: List[Dict], step: int, margin: int,
 # ---------------- 主流程 ----------------
 def detect(video: str, step_sec: float = 0.1, iou_thr: float = 0.3,
            margin: int = 3, out_path: Optional[str] = None,
-           on_progress=None, thresh: float = 0.3, box_thresh: float = 0.5,
-           rec_score: float = 0.55, min_h: int = 20) -> Dict:
+           on_progress=None, thresh: float = 0.6, box_thresh: float = 0.8,
+           rec_score: float = 0.95, min_h: int = 20) -> Dict:
     from rapidocr_onnxruntime import RapidOCR
 
     meta = ffprobe_meta(video)
@@ -237,11 +237,11 @@ def main() -> int:
     ap.add_argument("--step-sec", type=float, default=0.1, help="抽帧间隔秒")
     ap.add_argument("--iou", type=float, default=0.3, help="合并 IoU 阈值")
     ap.add_argument("--margin", type=int, default=3, help="框外扩像素")
-    ap.add_argument("--thresh", type=float, default=0.3,
+    ap.add_argument("--thresh", type=float, default=0.6,
                     help="DBNet 概率图二值化阈值（小=框更松更全）")
-    ap.add_argument("--box-thresh", dest="box_thresh", type=float, default=0.5,
+    ap.add_argument("--box-thresh", dest="box_thresh", type=float, default=0.8,
                     help="候选框整体置信度门槛（小=保留更多弱候选）")
-    ap.add_argument("--rec-score", type=float, default=0.55,
+    ap.add_argument("--rec-score", type=float, default=0.95,
                     help="OCR 识别过滤分数：识别置信度低于它的一律丢弃（杀误检主手段）")
     ap.add_argument("--min-h", dest="min_h", type=int, default=20,
                     help="最小文字高度(px)：检测框高度低于它的一律丢弃（过滤小字）")

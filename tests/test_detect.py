@@ -235,8 +235,8 @@ def test_real_material() -> None:
           f"{len(result.get('boxes', []))} 框 / providers={result.get('providers')}")
     check("检测跑在 GPU", "CUDAExecutionProvider" in result.get("providers", []),
           str(result.get("providers")))
-    check("阈值参数随结果返回", result.get("thresh") == 0.3
-          and result.get("box_thresh") == 0.5 and result.get("rec_score") == 0.55
+    check("阈值参数随结果返回", result.get("thresh") == 0.6
+          and result.get("box_thresh") == 0.8 and result.get("rec_score") == 0.95
           and result.get("min_h") == 20,
           f"thresh={result.get('thresh')} box_thresh={result.get('box_thresh')} "
           f"rec_score={result.get('rec_score')} min_h={result.get('min_h')}")

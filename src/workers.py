@@ -26,8 +26,8 @@ AUTO_DETECT_SCRIPT = os.path.join(
 
 def run_detect_subprocess(video: str, step_sec: float, iou_thr: float,
                           margin: int, on_progress=None,
-                          thresh: float = 0.3, box_thresh: float = 0.5,
-                          rec_score: float = 0.55, min_h: int = 20) -> dict:
+                          thresh: float = 0.6, box_thresh: float = 0.8,
+                          rec_score: float = 0.95, min_h: int = 20) -> dict:
     """调用 tools/auto_detect.py 子进程跑检测，返回结果 JSON(dict)。
 
     on_progress(frame_no) 由子进程 stderr 的 PROGRESS 行驱动。
@@ -221,8 +221,8 @@ class DetectWorker(QThread):
     failed = Signal(str)
 
     def __init__(self, video: str, step_sec: float = 0.1, iou_thr: float = 0.3,
-                 margin: int = 3, thresh: float = 0.3, box_thresh: float = 0.5,
-                 rec_score: float = 0.55, min_h: int = 20, parent=None):
+                 margin: int = 3, thresh: float = 0.6, box_thresh: float = 0.8,
+                 rec_score: float = 0.95, min_h: int = 20, parent=None):
         super().__init__(parent)
         self.video = video
         self.step_sec = step_sec
@@ -262,8 +262,8 @@ class GenerateWorker(QThread):
 
     def __init__(self, videos: List[str], step_sec: float = 0.1,
                  iou_thr: float = 0.3, margin: int = 3,
-                 thresh: float = 0.3, box_thresh: float = 0.5,
-                 rec_score: float = 0.55, min_h: int = 20, parent=None):
+                 thresh: float = 0.6, box_thresh: float = 0.8,
+                 rec_score: float = 0.95, min_h: int = 20, parent=None):
         super().__init__(parent)
         self.videos = videos
         self.step_sec = step_sec
