@@ -220,8 +220,8 @@ class DetectWorker(QThread):
     finished_ok = Signal(list, str)     # boxes, 摘要
     failed = Signal(str)
 
-    def __init__(self, video: str, step_sec: float = 0.5, iou_thr: float = 0.3,
-                 margin: int = 8, thresh: float = 0.3, box_thresh: float = 0.5,
+    def __init__(self, video: str, step_sec: float = 0.1, iou_thr: float = 0.3,
+                 margin: int = 3, thresh: float = 0.3, box_thresh: float = 0.5,
                  rec_score: float = 0.55, parent=None):
         super().__init__(parent)
         self.video = video
@@ -259,8 +259,8 @@ class GenerateWorker(QThread):
     item_failed = Signal(int, str)              # idx, err
     finished_all = Signal(dict)
 
-    def __init__(self, videos: List[str], step_sec: float = 0.5,
-                 iou_thr: float = 0.3, margin: int = 8,
+    def __init__(self, videos: List[str], step_sec: float = 0.1,
+                 iou_thr: float = 0.3, margin: int = 3,
                  thresh: float = 0.3, box_thresh: float = 0.5,
                  rec_score: float = 0.55, parent=None):
         super().__init__(parent)

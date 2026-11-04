@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
-"""文字区域自动检测（RapidOCR det-only）→ 擦除框 JSON。
+"""文字区域自动检测（RapidOCR det+rec）→ 擦除框 JSON。
 
 独立子进程脚本，运行在 <OCR_ENV> 环境（rapidocr-onnxruntime +
-onnxruntime-gpu），不依赖本项目 venv。输入视频，输出 JSON：
+onnxruntime-gpu），不依赖本项目 venv。RapidOCR 原生管线出框，rec 识别过滤误检，
+跨采样帧的框合成时间簇得到擦除框。输入视频，输出 JSON：
 {
   "video", "fps", "nb_frames", "width", "height", "step_frames",
   "providers", "det_seconds",
@@ -11,8 +12,8 @@ onnxruntime-gpu），不依赖本项目 venv。输入视频，输出 JSON：
 坐标为源视频像素，start/end 为闭区间帧号（与工程 Box 同语义）。
 
 用法：
-  python tools/auto_detect.py --video <path> [--step-sec 0.5]
-      [--iou 0.3] [--margin 8] [--out result.json]
+  python tools/auto_detect.py --video <path> [--step-sec 0.1]
+      [--iou 0.3] [--margin 3] [--out result.json]
 """
 from __future__ import annotations
 
@@ -174,8 +175,8 @@ def clusters_to_boxes(clusters: List[Dict], step: int, margin: int,
 
 
 # ---------------- 主流程 ----------------
-def detect(video: str, step_sec: float = 0.5, iou_thr: float = 0.3,
-           margin: int = 8, out_path: Optional[str] = None,
+def detect(video: str, step_sec: float = 0.1, iou_thr: float = 0.3,
+           margin: int = 3, out_path: Optional[str] = None,
            on_progress=None, thresh: float = 0.3, box_thresh: float = 0.5,
            rec_score: float = 0.55) -> Dict:
     from rapidocr_onnxruntime import RapidOCR
@@ -230,9 +231,9 @@ def detect(video: str, step_sec: float = 0.5, iou_thr: float = 0.3,
 def main() -> int:
     ap = argparse.ArgumentParser(description="文字区域自动检测 → 擦除框 JSON")
     ap.add_argument("--video", required=True)
-    ap.add_argument("--step-sec", type=float, default=0.5, help="抽帧间隔秒")
+    ap.add_argument("--step-sec", type=float, default=0.1, help="抽帧间隔秒")
     ap.add_argument("--iou", type=float, default=0.3, help="合并 IoU 阈值")
-    ap.add_argument("--margin", type=int, default=8, help="框外扩像素")
+    ap.add_argument("--margin", type=int, default=3, help="框外扩像素")
     ap.add_argument("--thresh", type=float, default=0.3,
                     help="DBNet 概率图二值化阈值（小=框更松更全）")
     ap.add_argument("--box-thresh", dest="box_thresh", type=float, default=0.5,

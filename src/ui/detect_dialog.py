@@ -14,8 +14,8 @@ class DetectParamsDialog(QDialog):
 
         self.sp_step = QDoubleSpinBox()
         self.sp_step.setRange(0.1, 5.0)
-        self.sp_step.setSingleStep(0.1)
-        self.sp_step.setValue(0.5)
+        self.sp_step.setSingleStep(0.05)
+        self.sp_step.setValue(0.1)
         self.sp_step.setSuffix(" s")
         self.sp_step.setToolTip("隔多久抽一帧做检测：越小越准越慢")
         form.addRow("抽帧间隔", self.sp_step)
@@ -29,7 +29,7 @@ class DetectParamsDialog(QDialog):
 
         self.sp_margin = QSpinBox()
         self.sp_margin.setRange(0, 64)
-        self.sp_margin.setValue(8)
+        self.sp_margin.setValue(3)
         self.sp_margin.setSuffix(" px")
         self.sp_margin.setToolTip("检测框向外扩展，避免贴字太紧擦不干净")
         form.addRow("外扩边距", self.sp_margin)
