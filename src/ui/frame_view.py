@@ -27,7 +27,7 @@ def color_of(idx: int) -> QColor:
 class FrameView(QWidget):
     box_created = Signal(object)
     box_changed = Signal()
-    selection_changed = Signal(object)   # Box or None
+    selection_changed = Signal(object)   # box_id (str) or None
 
     MODE_NONE, MODE_NEW, MODE_MOVE, MODE_RESIZE = 0, 1, 2, 3
 
@@ -56,6 +56,7 @@ class FrameView(QWidget):
         self._temp_rect: Optional[QRect] = None
         self._click_candidates: List[str] = []   # 按下时命中的框 id（后画的在前）
         self._press_pos = QPoint()
+        self._pending_cycle = False              # 对已选中框原地点击 → 松开时轮换
 
     # ---------- 帧 ----------
     def set_frame(self, bgr: Optional[np.ndarray]) -> None:
@@ -149,18 +150,25 @@ class FrameView(QWidget):
                 self._orig = (sel.x, sel.y, sel.w, sel.h)
                 self._start = p
                 return
-        # 命中的所有框（后画的在前）：原地点击可在重叠框间轮选
+        # 命中的所有框（后画的在前）：点击选中；对已选中的框原地点击则轮换
         cands = [b for b in reversed(self._active_boxes())
                  if self.box_rect_widget(b).contains(p)]
         self._click_candidates = [b.id for b in cands]
         self._press_pos = p
+        self._pending_cycle = False
         if cands:
-            b = cands[0]
             self.mode = self.MODE_MOVE
-            self._orig = (b.x, b.y, b.w, b.h)
             self._start = p
-            self.selected_id = b.id
-            self.selection_changed.emit(b)
+            cur = self._box_by_id(self.selected_id)
+            if cur is not None and cur.id in self._click_candidates:
+                self._pending_cycle = True     # 已选中其中一个 → 松开时轮换
+                b = cur                        # 拖动基准保持当前选中框
+            else:
+                self._pending_cycle = False
+                b = cands[0]
+                self.selected_id = b.id
+                self.selection_changed.emit(b.id)
+            self._orig = (b.x, b.y, b.w, b.h)
             self.update()
             return
         self.mode = self.MODE_NEW
@@ -211,20 +219,22 @@ class FrameView(QWidget):
                         start=self.frame_idx, end=last)
                 self.selected_id = b.id
                 self.box_created.emit(b)
-                self.selection_changed.emit(b)
+                self.selection_changed.emit(b.id)
         elif self.mode == self.MODE_MOVE:
             moved = (e.position().toPoint() - self._press_pos).manhattanLength() > DRAG_THRESH
-            if not moved and len(self._click_candidates) > 1:
-                # 原地点击：在重叠的框之间轮选
+            if (not moved and self._pending_cycle
+                    and len(self._click_candidates) > 1):
+                # 对已选中的框原地点击：在重叠的框之间轮选
                 ids = self._click_candidates
                 try:
                     nxt = ids[(ids.index(self.selected_id) + 1) % len(ids)]
                 except ValueError:
                     nxt = ids[0]
                 self.selected_id = nxt
-                self.selection_changed.emit(self._box_by_id(nxt))
+                self.selection_changed.emit(nxt)
             else:
                 self.box_changed.emit()
+            self._pending_cycle = False
         elif self.mode == self.MODE_RESIZE:
             self.box_changed.emit()
         self.mode = self.MODE_NONE

@@ -296,6 +296,8 @@ class MainWindow(QMainWindow):
             self._on_delete_box(bid)
 
     def _on_select(self, box_id) -> None:
+        if box_id is not None and hasattr(box_id, "id"):   # 兼容误传 Box 对象
+            box_id = box_id.id
         self.view.set_selected(box_id)
         self.panel.select_box(box_id)
 

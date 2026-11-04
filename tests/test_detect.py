@@ -238,9 +238,61 @@ def test_real_material() -> None:
     os.remove(tmp)
 
 
+def test_frame_click_select() -> None:
+    """回归：画面上点击框必须真的选中（selection_changed 发 id 字符串）。"""
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    import numpy as np
+    from PySide6.QtCore import QPointF, QEvent, Qt
+    from PySide6.QtGui import QMouseEvent
+    from PySide6.QtWidgets import QApplication
+    from src.project import Box
+    from src.ui.frame_view import FrameView
+
+    app = QApplication.instance() or QApplication([])
+    fv = FrameView()
+    fv.resize(400, 300)
+    fv.set_frame(np.zeros((100, 200, 3), np.uint8))   # 视频 200x100
+    fv.update_view_rect()
+
+    b1 = Box(x=20, y=20, w=60, h=30, start=0, end=99)
+    b2 = Box(x=25, y=22, w=60, h=30, start=0, end=99)   # 与 b1 重叠
+    fv.set_boxes([b1, b2])
+
+    got = []
+    fv.selection_changed.connect(got.append)
+
+    def click(x, y):
+        p = QPointF(x, y)
+        fv.mousePressEvent(QMouseEvent(QEvent.Type.MouseButtonPress, p,
+                                       Qt.MouseButton.LeftButton,
+                                       Qt.MouseButton.LeftButton,
+                                       Qt.KeyboardModifier.NoModifier))
+        fv.mouseReleaseEvent(QMouseEvent(QEvent.Type.MouseButtonRelease, p,
+                                         Qt.MouseButton.LeftButton,
+                                         Qt.MouseButton.NoButton,
+                                         Qt.KeyboardModifier.NoModifier))
+
+    wp = fv.to_widget(30, 25)     # 两个框重叠的区域内
+    click(wp.x(), wp.y())
+    check("点击框选中(发id字符串)", got and got[-1] == b2.id
+          and fv.selected_id == b2.id, f"got={got[-1] if got else None}")
+    click(wp.x(), wp.y())         # 原地再点 → 轮选到 b1
+    check("原地再点轮选", got[-1] == b1.id and fv.selected_id == b1.id,
+          f"got={got[-1]}")
+    # 点击空白 → 不选中（进入新建模式，不产生新框）
+    n_before = len(fv.boxes)
+    corner = fv.to_widget(190, 90)
+    click(corner.x(), corner.y())
+    check("点击框外不误选", fv.selected_id == b1.id or fv.selected_id is None,
+          f"sel={fv.selected_id}")
+    check("点击空白不建框", len(fv.boxes) == n_before)
+    app.processEvents()
+
+
 def main() -> int:
     test_track_assignment()
     test_selection_ui()
+    test_frame_click_select()
     test_merge_logic()
     test_project_format()
     test_real_material()
