@@ -106,6 +106,7 @@ class MainWindow(QMainWindow):
 
         self.timeline = TimelineWidget()
         self.timeline.seeked.connect(self.seek)
+        self.timeline.box_clicked.connect(self._on_select)
         lv.addWidget(self.timeline)
 
         self.panel = BoxPanel()

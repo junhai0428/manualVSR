@@ -66,6 +66,61 @@ def test_track_assignment() -> None:
     app.processEvents()
 
 
+def test_selection_ui() -> None:
+    """框变多后的选中体验：时间轴点色块选中 + 面板筛选。"""
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtCore import QPoint
+    from PySide6.QtWidgets import QApplication
+    from src.project import Project, Box
+    from src.ui.timeline import TimelineWidget
+    from src.ui.box_panel import BoxPanel
+
+    app = QApplication.instance() or QApplication([])
+
+    # 时间轴：点击轨道色块命中对应框，空白处不命中
+    t = TimelineWidget()
+    t.set_meta(100)
+    t.resize(400, 60)
+    boxes = [Box(x=0, y=0, w=10, h=10, start=0, end=40),
+             Box(x=0, y=0, w=10, h=10, start=0, end=40),
+             Box(x=0, y=0, w=10, h=10, start=50, end=60)]
+    t.set_boxes(boxes)
+    t._assign_tracks()
+    check("重叠框分两轨", len(t._tracks) == 2)
+    # 第 0 轨第 1 个框（start=0）中点
+    r0 = t._box_rect(*t._tracks[0][0][1:], 0)
+    hit0 = t._box_at(r0.center())
+    check("时间轴命中轨道0框", hit0 == boxes[0].id, f"{hit0}")
+    r1 = t._box_rect(*t._tracks[1][0][1:], 1)
+    hit1 = t._box_at(r1.center())
+    check("时间轴命中轨道1框", hit1 == boxes[1].id, f"{hit1}")
+    check("时间轴空白不命中", t._box_at(QPoint(t.width() - 5, t.height() - 2)) is None)
+
+    # 面板筛选：过滤后行→id 映射仍正确，选中被隐藏的框会清筛选
+    panel = BoxPanel()
+    p = Project(video="v.mp4")
+    p.boxes = [Box(x=0, y=0, w=10, h=10, start=0, end=90, label=""),
+               Box(x=0, y=0, w=10, h=10, start=10, end=20, label="自动"),
+               Box(x=0, y=0, w=10, h=10, start=30, end=40, label="自动")]
+    panel.set_project(p, 100)
+    check("面板未筛选行数", panel.table.rowCount() == 3)
+    panel.ed_filter.setText("自动")
+    check("筛选后行数", panel.table.rowCount() == 2,
+          f"rows={panel.table.rowCount()}")
+    panel.table.setCurrentCell(0, 0)
+    check("筛选后选中映射", panel.selected_box_id() == p.boxes[1].id)
+    panel.ed_filter.clear()
+    panel.ed_filter.setText("50")
+    panel.select_box(p.boxes[0].id)          # 被筛选隐藏 → 应清筛选并选中
+    check("选中隐藏框清筛选", panel.ed_filter.text() == ""
+          and panel.selected_box_id() == p.boxes[0].id)
+    panel.set_frame_idx(35)
+    panel.ck_active.setChecked(True)
+    check("仅当前帧生效过滤", panel.table.rowCount() == 2,
+          f"rows={panel.table.rowCount()}")   # 35 帧: 框0(0-90)、框2(30-40) 生效
+    app.processEvents()
+
+
 def test_merge_logic() -> None:
     """检测框合并：位置相近且时间连续的并入同簇。"""
     sys.path.insert(0, os.path.join(ROOT, "tools"))
@@ -185,6 +240,7 @@ def test_real_material() -> None:
 
 def main() -> int:
     test_track_assignment()
+    test_selection_ui()
     test_merge_logic()
     test_project_format()
     test_real_material()

@@ -8,7 +8,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel,
                                QTableWidget, QTableWidgetItem, QAbstractItemView,
                                QSpinBox, QPushButton, QComboBox, QCheckBox, QFormLayout,
-                               QHeaderView)
+                               QHeaderView, QLineEdit)
 
 from ..project import Box, Project
 
@@ -30,6 +30,18 @@ class BoxPanel(QWidget):
         root.setContentsMargins(6, 6, 6, 6)
 
         # ---- 框列表 ----
+        frow = QHBoxLayout()
+        self.ed_filter = QLineEdit()
+        self.ed_filter.setPlaceholderText("筛选：编号/时段/位置/标签（如 自动）")
+        self.ed_filter.setClearButtonEnabled(True)
+        self.ed_filter.textChanged.connect(lambda _t: self.refresh())
+        self.ck_active = QCheckBox("仅当前帧生效")
+        self.ck_active.toggled.connect(lambda _on: self.refresh())
+        self.ck_active.setToolTip("只显示当前帧正在生效的框，方便从大量自动框里找")
+        frow.addWidget(self.ed_filter, 1)
+        frow.addWidget(self.ck_active)
+        root.addLayout(frow)
+
         self.table = QTableWidget(0, 4)
         self.table.setHorizontalHeaderLabels(["#", "时段(帧)", "位置", "帧数"])
         self.table.verticalHeader().setVisible(False)
@@ -138,12 +150,30 @@ class BoxPanel(QWidget):
     def set_frame_idx(self, idx: int) -> None:
         self.frame_idx = idx
 
+    def _visible_boxes(self) -> List[tuple]:
+        """[(原始序号, Box)]，按筛选条件过滤。"""
+        if not self.project:
+            return []
+        flt = self.ed_filter.text().strip().lower()
+        out = []
+        for i, b in enumerate(self.project.boxes):
+            if self.ck_active.isChecked() and not b.covers(self.frame_idx):
+                continue
+            if flt:
+                hay = f"#{i + 1} {b.span_text(self._nb_frames)} " \
+                      f"{b.x},{b.y} {b.w}x{b.h} {b.label}".lower()
+                if flt not in hay:
+                    continue
+            out.append((i, b))
+        return out
+
     def refresh(self) -> None:
         if not self.project:
             return
         self._updating = True
-        self.table.setRowCount(len(self.project.boxes))
-        for i, b in enumerate(self.project.boxes):
+        visible = self._visible_boxes()
+        self.table.setRowCount(len(visible))
+        for r, (i, b) in enumerate(visible):
             lo, hi = b.span(self._nb_frames)
             vals = [str(i + 1), b.span_text(self._nb_frames),
                     f"{b.x},{b.y} {b.w}x{b.h}", str(hi - lo + 1)]
@@ -152,7 +182,7 @@ class BoxPanel(QWidget):
                 it.setData(Qt.ItemDataRole.UserRole, b.id)
                 if not b.enabled:
                     it.setForeground(Qt.GlobalColor.gray)
-                self.table.setItem(i, c, it)
+                self.table.setItem(r, c, it)
         sel = self.current_box()
         if sel:
             self.sp_start.setValue(sel.start)
@@ -163,9 +193,10 @@ class BoxPanel(QWidget):
 
     def selected_box_id(self) -> Optional[str]:
         r = self.table.currentRow()
-        if r < 0 or not self.project or r >= len(self.project.boxes):
+        if r < 0:
             return None
-        return self.project.boxes[r].id
+        it = self.table.item(r, 0)
+        return it.data(Qt.ItemDataRole.UserRole) if it else None
 
     def current_box(self) -> Optional[Box]:
         bid = self.selected_box_id()
@@ -177,13 +208,22 @@ class BoxPanel(QWidget):
         return None
 
     def select_box(self, box_id: Optional[str]) -> None:
-        if not self.project or not box_id:
+        if not box_id:
             self.table.clearSelection()
             return
-        for i, b in enumerate(self.project.boxes):
-            if b.id == box_id:
-                self.table.setCurrentCell(i, 0)
+        for r in range(self.table.rowCount()):
+            it = self.table.item(r, 0)
+            if it and it.data(Qt.ItemDataRole.UserRole) == box_id:
+                self.table.setCurrentCell(r, 0)
                 return
+        # 目标框被筛选隐藏时，清掉筛选再选
+        if self.ed_filter.text() or self.ck_active.isChecked():
+            self._updating = True
+            self.ed_filter.clear()
+            self.ck_active.setChecked(False)
+            self._updating = False
+            self.refresh()
+            self.select_box(box_id)
 
     # ---------- 交互 ----------
     def _on_row_changed(self, r, c, pr, pc) -> None:

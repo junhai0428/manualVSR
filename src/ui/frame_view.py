@@ -16,6 +16,7 @@ from PySide6.QtWidgets import QWidget
 from ..project import Box
 
 HANDLE = 8
+DRAG_THRESH = 5          # 位移超过该像素算拖动，否则算点击（轮选重叠框）
 COLORS = ["#ff5252", "#4caf50", "#2196f3", "#ff9800", "#9c27b0", "#00bcd4", "#e91e63"]
 
 
@@ -53,6 +54,8 @@ class FrameView(QWidget):
         self._orig: Optional[Tuple[int, int, int, int]] = None
         self._handle = 0
         self._temp_rect: Optional[QRect] = None
+        self._click_candidates: List[str] = []   # 按下时命中的框 id（后画的在前）
+        self._press_pos = QPoint()
 
     # ---------- 帧 ----------
     def set_frame(self, bgr: Optional[np.ndarray]) -> None:
@@ -146,15 +149,20 @@ class FrameView(QWidget):
                 self._orig = (sel.x, sel.y, sel.w, sel.h)
                 self._start = p
                 return
-        for b in reversed(self._active_boxes()):
-            if self.box_rect_widget(b).contains(p):
-                self.mode = self.MODE_MOVE
-                self._orig = (b.x, b.y, b.w, b.h)
-                self._start = p
-                self.selected_id = b.id
-                self.selection_changed.emit(b)
-                self.update()
-                return
+        # 命中的所有框（后画的在前）：原地点击可在重叠框间轮选
+        cands = [b for b in reversed(self._active_boxes())
+                 if self.box_rect_widget(b).contains(p)]
+        self._click_candidates = [b.id for b in cands]
+        self._press_pos = p
+        if cands:
+            b = cands[0]
+            self.mode = self.MODE_MOVE
+            self._orig = (b.x, b.y, b.w, b.h)
+            self._start = p
+            self.selected_id = b.id
+            self.selection_changed.emit(b)
+            self.update()
+            return
         self.mode = self.MODE_NEW
         self._start = p
         self._temp_rect = QRect(p, p)
@@ -204,7 +212,20 @@ class FrameView(QWidget):
                 self.selected_id = b.id
                 self.box_created.emit(b)
                 self.selection_changed.emit(b)
-        elif self.mode in (self.MODE_MOVE, self.MODE_RESIZE):
+        elif self.mode == self.MODE_MOVE:
+            moved = (e.position().toPoint() - self._press_pos).manhattanLength() > DRAG_THRESH
+            if not moved and len(self._click_candidates) > 1:
+                # 原地点击：在重叠的框之间轮选
+                ids = self._click_candidates
+                try:
+                    nxt = ids[(ids.index(self.selected_id) + 1) % len(ids)]
+                except ValueError:
+                    nxt = ids[0]
+                self.selected_id = nxt
+                self.selection_changed.emit(self._box_by_id(nxt))
+            else:
+                self.box_changed.emit()
+        elif self.mode == self.MODE_RESIZE:
             self.box_changed.emit()
         self.mode = self.MODE_NONE
         self.update()

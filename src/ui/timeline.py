@@ -7,7 +7,7 @@
 """
 from __future__ import annotations
 
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 from PySide6.QtCore import Qt, QRect, Signal
 from PySide6.QtGui import QColor, QPainter, QPen, QMouseEvent, QPaintEvent
@@ -25,6 +25,7 @@ PAD_BOTTOM = 8        # 底部留白（刻度）
 
 class TimelineWidget(QWidget):
     seeked = Signal(int)
+    box_clicked = Signal(str)     # 点击轨道上的框色块 -> box_id
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -102,9 +103,29 @@ class TimelineWidget(QWidget):
         return QRect(x1, tr.y(), x2 - x1, tr.height())
 
     # ---------------- 交互 ----------------
+    def _box_at(self, p) -> Optional[str]:
+        """命中轨道色块则返回 box_id（自上而下找）。"""
+        for ti, tr in enumerate(self._tracks):
+            if not self._track_rect(ti).adjusted(0, -2, 0, 2).contains(p):
+                continue
+            for i, lo, hi in tr:
+                if self._box_rect(lo, hi, ti).adjusted(-1, 0, 1, 0).contains(p):
+                    return self.boxes[i].id
+            break
+        if self._overflow and self._tracks:      # 溢出框叠画在最后一轨
+            last = len(self._tracks) - 1
+            for i, lo, hi in self._overflow:
+                if self._box_rect(lo, hi, last).contains(p):
+                    return self.boxes[i].id
+        return None
+
     def mousePressEvent(self, e: QMouseEvent) -> None:
+        p = e.position().toPoint()
         self._dragging = True
-        self.seeked.emit(self._frame_at(e.position().toPoint().x()))
+        bid = self._box_at(p)
+        if bid:
+            self.box_clicked.emit(bid)
+        self.seeked.emit(self._frame_at(p.x()))
 
     def mouseMoveEvent(self, e: QMouseEvent) -> None:
         if self._dragging:
