@@ -121,6 +121,25 @@ def test_selection_ui() -> None:
     app.processEvents()
 
 
+def test_replace_boxes() -> None:
+    """重跑检测：原有框（不分手动/自动）全部清除，换成新框。"""
+    from src.project import Project, Box
+
+    p = Project(video="v.mp4")
+    p.add_box(Box(x=0, y=0, w=10, h=10, start=0, end=10))                   # 手动
+    p.add_box(Box(x=0, y=0, w=10, h=10, start=5, end=15, label="自动"))
+    new = [Box(x=1, y=1, w=20, h=20, start=0, end=99, label="自动"),
+           Box(x=2, y=2, w=20, h=20, start=0, end=99, label="自动")]
+    cleared = p.replace_boxes(new)
+    check("重跑清除全部旧框", cleared == 2 and len(p.boxes) == 2,
+          f"cleared={cleared} boxes={len(p.boxes)}")
+    check("只剩新框", {b.id for b in new} == {b.id for b in p.boxes})
+    # 再跑一次
+    new2 = [Box(x=3, y=3, w=5, h=5, start=0, end=1)]
+    check("再次重跑", p.replace_boxes(new2) == 2
+          and [b.id for b in p.boxes] == [new2[0].id])
+
+
 def test_merge_logic() -> None:
     """检测框合并：位置相近且时间连续的并入同簇。"""
     sys.path.insert(0, os.path.join(ROOT, "tools"))
@@ -297,6 +316,7 @@ def main() -> int:
     test_track_assignment()
     test_selection_ui()
     test_frame_click_select()
+    test_replace_boxes()
     test_merge_logic()
     test_project_format()
     test_real_material()

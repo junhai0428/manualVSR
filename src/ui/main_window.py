@@ -448,10 +448,12 @@ class MainWindow(QMainWindow):
             return
         for b in boxes:
             b.clamp(self.meta.width, self.meta.height, self.meta.nb_frames)
-            self.project.add_box(b)
+        # 重跑检测：清掉原有全部框（不分手动/自动），换成新结果
+        cleared = self.project.replace_boxes(boxes)
         self.dirty = True
         self._refresh_boxes()
-        self.lb_status.setText(f"自动检测完成：新增 {len(boxes)} 个框 · {summary}")
+        tip = f"（已清除原有 {cleared} 个框）" if cleared else ""
+        self.lb_status.setText(f"自动检测完成：{len(boxes)} 个框{tip} · {summary}")
 
     def _on_detect_failed(self, err: str) -> None:
         self._on_detect_ui_reset()

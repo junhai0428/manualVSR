@@ -103,6 +103,15 @@ class Project:
                 return True
         return False
 
+    def replace_boxes(self, new_boxes: List[Box]) -> int:
+        """重跑自动检测：清掉原有全部框（不分手动/自动），放入新框。
+
+        返回被清除的旧框数量。
+        """
+        old = len(self.boxes)
+        self.boxes = list(new_boxes)
+        return old
+
     def active_boxes(self, frame: int) -> List[Box]:
         return [b for b in self.boxes if b.covers(frame)]
 
