@@ -425,7 +425,7 @@ class MainWindow(QMainWindow):
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
         (step, iou, margin, thresh, box_thr, rec_score, min_h,
-         bridge_sec) = dlg.values()
+         bridge_sec, max_angle, max_h) = dlg.values()
         self.act_detect.setEnabled(False)
         self.act_erase.setEnabled(False)
         self.progress.setRange(0, self.meta.nb_frames - 1)
@@ -434,7 +434,7 @@ class MainWindow(QMainWindow):
         self.lb_status.setText("自动检测中…（OCR GPU）")
         self.detect_worker = DetectWorker(self.project.video, step, iou, margin,
                                           thresh, box_thr, rec_score, min_h,
-                                          bridge_sec, self)
+                                          bridge_sec, max_angle, max_h, self)
         self.detect_worker.progress.connect(self._on_detect_progress)
         self.detect_worker.finished_ok.connect(self._on_detect_done)
         self.detect_worker.failed.connect(self._on_detect_failed)

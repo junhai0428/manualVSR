@@ -106,6 +106,26 @@ def rect_of(points) -> Rect:
             max(1, int(round(x1 - x0))), max(1, int(round(y1 - y0))))
 
 
+def quad_angle(points) -> float:
+    """文字框倾斜角度（度），取文本框上边缘方向，范围 [-90, 90]。
+
+    水平字幕≈0°，斜排的包装/背景文字角度明显。
+    """
+    import math
+    if not points or len(points) < 4:
+        return 0.0
+    dx = float(points[1][0]) - float(points[0][0])
+    dy = float(points[1][1]) - float(points[0][1])
+    if abs(dx) < 1e-6 and abs(dy) < 1e-6:
+        return 0.0
+    a = math.degrees(math.atan2(dy, dx))
+    while a > 90:
+        a -= 180
+    while a < -90:
+        a += 180
+    return a
+
+
 def iou(a: Rect, b: Rect) -> float:
     ax0, ay0, aw, ah = a
     bx0, by0, bw, bh = b
@@ -218,7 +238,8 @@ def detect(video: str, step_sec: float = 0.1, iou_thr: float = 0.3,
            margin: int = 3, out_path: Optional[str] = None,
            on_progress=None, thresh: float = 0.6, box_thresh: float = 0.8,
            rec_score: float = 0.8, min_h: int = 20,
-           bridge_sec: float = 0.5) -> Dict:
+           bridge_sec: float = 0.5, max_angle: float = 10.0,
+           max_h: int = 0) -> Dict:
     from rapidocr_onnxruntime import RapidOCR
 
     meta = ffprobe_meta(video)
@@ -250,6 +271,10 @@ def detect(video: str, step_sec: float = 0.1, iou_thr: float = 0.3,
                 continue
             if r[3] < min_h:                # 过滤小字（商品包装/衣服上的小文字）
                 continue
+            if max_h > 0 and r[3] > max_h:  # 过滤超大字（背景装饰大字）
+                continue
+            if max_angle > 0 and abs(quad_angle(points)) > max_angle:
+                continue                    # 过滤倾斜文字（斜排的包装/背景字）
             dets.append({"frame": frame_no, "rect": r,
                          "text": text, "score": score})
     det_seconds = round(time.time() - t0, 2)
@@ -268,6 +293,7 @@ def detect(video: str, step_sec: float = 0.1, iou_thr: float = 0.3,
               "sampled": n_sampled, "providers": providers,
               "thresh": thresh, "box_thresh": box_thresh, "rec_score": rec_score,
               "min_h": min_h, "bridge_sec": bridge_sec,
+              "max_angle": max_angle, "max_h": max_h,
               "det_seconds": det_seconds, "boxes": boxes}
     if out_path:
         with open(out_path, "w", encoding="utf-8") as f:
@@ -291,6 +317,10 @@ def main() -> int:
                     help="最小文字高度(px)：检测框高度低于它的一律丢弃（过滤小字）")
     ap.add_argument("--bridge-sec", type=float, default=0.5,
                     help="断点桥接：同一位置字幕两段框间隙小于该秒数则合并（0=关闭）")
+    ap.add_argument("--max-angle", dest="max_angle", type=float, default=10.0,
+                    help="最大倾斜角度(度)：超过它的倾斜文字丢弃（0=不过滤）")
+    ap.add_argument("--max-h", dest="max_h", type=int, default=0,
+                    help="最大文字高度(px)：超过它的超大字丢弃（0=不过滤）")
     ap.add_argument("--out", default=None, help="输出 JSON 路径")
     ap.add_argument("--progress", action="store_true", help="stderr 输出进度")
     args = ap.parse_args()
@@ -302,7 +332,8 @@ def main() -> int:
                on_progress=prog if args.progress else None,
                thresh=args.thresh, box_thresh=args.box_thresh,
                rec_score=args.rec_score, min_h=args.min_h,
-               bridge_sec=args.bridge_sec)
+               bridge_sec=args.bridge_sec, max_angle=args.max_angle,
+               max_h=args.max_h)
     print(json.dumps({
         "providers": r["providers"], "det_seconds": r["det_seconds"],
         "sampled": r["sampled"], "boxes": len(r["boxes"]),

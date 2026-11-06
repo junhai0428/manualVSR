@@ -73,6 +73,23 @@ class DetectParamsDialog(QDialog):
                                 "用于过滤商品包装/衣服上的小字（0=不过滤）")
         form.addRow("最小文字高度", self.sp_minh)
 
+        self.sp_maxh = QSpinBox()
+        self.sp_maxh.setRange(0, 500)
+        self.sp_maxh.setValue(0)
+        self.sp_maxh.setSuffix(" px")
+        self.sp_maxh.setToolTip("最大文字高度：检测框高度超过它的一律丢弃，"
+                                "用于过滤背景装饰大字（0=不过滤）")
+        form.addRow("最大文字高度", self.sp_maxh)
+
+        self.sp_angle = QDoubleSpinBox()
+        self.sp_angle.setRange(0.0, 45.0)
+        self.sp_angle.setSingleStep(1.0)
+        self.sp_angle.setValue(10.0)
+        self.sp_angle.setSuffix(" °")
+        self.sp_angle.setToolTip("最大倾斜角度：文字框倾斜超过它的丢弃。"
+                                 "字幕/花字基本水平，包装上的斜排文字会被过滤（0=不过滤）")
+        form.addRow("最大倾斜角度", self.sp_angle)
+
         bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok |
                               QDialogButtonBox.StandardButton.Cancel)
         bb.accepted.connect(self.accept)
@@ -82,4 +99,5 @@ class DetectParamsDialog(QDialog):
     def values(self) -> tuple:
         return (self.sp_step.value(), self.sp_iou.value(), self.sp_margin.value(),
                 self.sp_thresh.value(), self.sp_box.value(), self.sp_rec.value(),
-                self.sp_minh.value(), self.sp_bridge.value())
+                self.sp_minh.value(), self.sp_bridge.value(),
+                self.sp_angle.value(), self.sp_maxh.value())

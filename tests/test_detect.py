@@ -140,6 +140,28 @@ def test_replace_boxes() -> None:
           and [b.id for b in p.boxes] == [new2[0].id])
 
 
+def test_quad_angle() -> None:
+    """倾斜角度计算：水平≈0°，斜排≈角度值。"""
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))), "tools"))
+    from auto_detect import quad_angle
+
+    flat = [(0, 100), (200, 100), (200, 140), (0, 140)]
+    check("水平框角度≈0", abs(quad_angle(flat)) < 0.5, f"{quad_angle(flat):.2f}")
+
+    # 上边缘向右下倾 15°
+    import math
+    dx, dy = 200 * math.cos(math.radians(15)), 200 * math.sin(math.radians(15))
+    slanted = [(0, 100), (dx, 100 + dy), (dx - 10, 100 + dy + 40), (-10, 140)]
+    a = quad_angle(slanted)
+    check("倾斜15°检出", abs(a - 15) < 0.5, f"{a:.2f}")
+
+    # 上边缘向左下倾（反向）
+    slanted2 = [(0, 100 + dy), (dx, 100), (dx + 10, 140), (10, 100 + dy + 40)]
+    a2 = quad_angle(slanted2)
+    check("反向倾斜检出", abs(a2 + 15) < 0.5, f"{a2:.2f}")
+
+
 def test_bridge_gaps() -> None:
     """断点桥接：同位置断段合并；相邻行/远距/超时不合。"""
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
@@ -275,7 +297,8 @@ def test_real_material() -> None:
           str(result.get("providers")))
     check("阈值参数随结果返回", result.get("thresh") == 0.6
           and result.get("box_thresh") == 0.8 and result.get("rec_score") == 0.8
-          and result.get("min_h") == 20 and result.get("bridge_sec") == 0.5,
+          and result.get("min_h") == 20 and result.get("bridge_sec") == 0.5
+          and result.get("max_angle") == 10.0 and result.get("max_h") == 0,
           f"thresh={result.get('thresh')} box_thresh={result.get('box_thresh')} "
           f"rec_score={result.get('rec_score')} min_h={result.get('min_h')}")
     check("小字已过滤", all(b["h"] >= 20 for b in result.get("boxes", [])),
@@ -358,6 +381,7 @@ def main() -> int:
     test_selection_ui()
     test_frame_click_select()
     test_replace_boxes()
+    test_quad_angle()
     test_bridge_gaps()
     test_merge_logic()
     test_project_format()
