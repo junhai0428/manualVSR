@@ -174,43 +174,53 @@ def union(a: Rect, b: Rect) -> Rect:
     return (x0, y0, x1 - x0, y1 - y0)
 
 
-def _spatially_same(a: Dict, b: Dict, ov_ratio: float = 0.5) -> bool:
-    """两框水平、垂直重叠比例都 >= ov_ratio 视为同一字幕的不同段。"""
-    ax1, ay1 = a["x"] + a["w"], a["y"] + a["h"]
-    bx1, by1 = b["x"] + b["w"], b["y"] + b["h"]
-    ow = min(ax1, bx1) - max(a["x"], b["x"])
-    oh = min(ay1, by1) - max(a["y"], b["y"])
-    if ow <= 0 or oh <= 0:
+def _same_line(a: Dict, b: Dict, ov_ratio: float = 0.5) -> bool:
+    """同一行：垂直中心接近且水平有足够重叠（上下两行字幕不会被判成同行）。"""
+    ac = a["y"] + a["h"] / 2
+    bc = b["y"] + b["h"] / 2
+    if abs(ac - bc) > 0.5 * min(a["h"], b["h"]):
         return False
-    return (ow / min(a["w"], b["w"]) >= ov_ratio
-            and oh / min(a["h"], b["h"]) >= ov_ratio)
+    ow = min(a["x"] + a["w"], b["x"] + b["w"]) - max(a["x"], b["x"])
+    return ow > 0 and ow / min(a["w"], b["w"]) >= ov_ratio
 
 
-def bridge_gaps(boxes: List[Dict], max_gap: int) -> List[Dict]:
-    """桥接同一句字幕被切成多段的框，消除中间无框的空洞。
+def _size_similar(a: Dict, b: Dict, sim: float = 0.8) -> bool:
+    """宽高比例都接近（比值 >= sim），差值大说明是不同长度的两句字幕。"""
+    return (min(a["w"], b["w"]) / max(a["w"], b["w"]) >= sim
+            and min(a["h"], b["h"]) / max(a["h"], b["h"]) >= sim)
 
-    max_gap: 允许桥接的最大帧间隙（frames）。空间重叠不足的不合并，
-    避免把上下相邻的两行字幕误并成一个。
+
+def bridge_gaps(boxes: List[Dict], max_gap: int, sim: float = 0.8) -> List[Dict]:
+    """修复同一行字幕被切成多段导致的空洞，同时避免框尺寸膨胀。
+
+    - 尺寸接近的相邻段（宽高比 >= sim）：合并成一个框（时间/矩形取并集）
+    - 尺寸差异大的相邻段（换句、长短变化）：不合并矩形，只把前一段的
+      end 延到后一段开头，填掉时间空洞；两段各自保留自己的矩形
     """
     if not boxes:
         return boxes
-    merged: List[Dict] = []
+    out: List[Dict] = []
     for b in sorted(boxes, key=lambda x: (x["y"], x["x"], x["start"])):
-        hit = None
-        for m in merged:
-            if b["start"] - m["end"] - 1 <= max_gap and _spatially_same(m, b):
-                hit = m
+        b = dict(b)
+        target = None
+        for m in reversed(out):
+            if _same_line(m, b) and b["start"] - m["end"] - 1 <= max_gap:
+                target = m
                 break
-        if hit is None:
-            merged.append(dict(b))
-        else:
-            x, y, w, h = union((hit["x"], hit["y"], hit["w"], hit["h"]),
-                               (b["x"], b["y"], b["w"], b["h"]))
-            hit.update(x=x, y=y, w=w, h=h,
-                       start=min(hit["start"], b["start"]),
-                       end=max(hit["end"], b["end"]))
-    merged.sort(key=lambda b: (b["y"], b["x"]))
-    return merged
+        if target is not None:
+            if _size_similar(target, b, sim):
+                x, y, w, h = union((target["x"], target["y"],
+                                    target["w"], target["h"]),
+                                   (b["x"], b["y"], b["w"], b["h"]))
+                target.update(x=x, y=y, w=w, h=h,
+                              start=min(target["start"], b["start"]),
+                              end=max(target["end"], b["end"]))
+                continue
+            if b["start"] - 1 > target["end"]:      # 只补时间洞
+                target["end"] = b["start"] - 1
+        out.append(b)
+    out.sort(key=lambda b: (b["y"], b["x"]))
+    return out
 
 
 def clusters_to_boxes(clusters: List[Dict], step: int, margin: int,

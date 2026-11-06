@@ -192,12 +192,30 @@ def test_bridge_gaps() -> None:
                      B(600, 900, 200, 60, 105, 200)], 20)
     check("不同位置不合并", len(r) == 2, str(r))
 
-    # 三段链式合并
+    # 三段链式合并（同尺寸）
     r = bridge_gaps([B(100, 900, 400, 60, 0, 50),
                      B(100, 900, 400, 60, 60, 120),
                      B(100, 900, 400, 60, 130, 200)], 20)
     check("链式合并", len(r) == 1 and r[0]["start"] == 0 and r[0]["end"] == 200,
           str(r))
+
+    # 同一行但长度差很多（换句）→ 不合并矩形，只补时间洞
+    r = bridge_gaps([B(100, 900, 400, 60, 0, 100),
+                     B(100, 900, 200, 60, 120, 200)], 20)
+    check("长短句不并矩形", len(r) == 2, str(r))
+    check("前段补洞到后段开头", r[0]["end"] == 119, str(r[0]))
+    check("长句宽度不被短句位置污染", max(b["w"] for b in r) == 400, str(r))
+
+    # 全程字幕长短交替：框宽不会被拉成最大宽度，且无时间空洞
+    boxes = [B(100, 900, 400, 60, 0, 100),
+             B(100, 900, 150, 60, 120, 200),
+             B(100, 900, 400, 60, 220, 300)]
+    r = bridge_gaps(sorted(boxes, key=lambda b: b["start"]), 20)
+    r.sort(key=lambda b: b["start"])
+    cov = all(r[i]["end"] + 1 >= r[i + 1]["start"] for i in range(len(r) - 1))
+    check("长短交替不膨胀", len(r) == 3 and max(b["w"] for b in r) == 400
+          and min(b["w"] for b in r) == 150, str(r))
+    check("长短交替无时间空洞", cov, str([(b["start"], b["end"]) for b in r]))
 
 
 def test_merge_logic() -> None:
