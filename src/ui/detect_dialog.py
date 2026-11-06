@@ -51,10 +51,19 @@ class DetectParamsDialog(QDialog):
         self.sp_rec = QDoubleSpinBox()
         self.sp_rec.setRange(0.1, 0.95)
         self.sp_rec.setSingleStep(0.05)
-        self.sp_rec.setValue(0.95)
+        self.sp_rec.setValue(0.8)
         self.sp_rec.setToolTip("OCR 识别过滤：候选框要能认出文字且置信度达标才保留。"
                                "调大=误检更少（杀误检主手段），调小=框更多")
         form.addRow("识别过滤分数", self.sp_rec)
+
+        self.sp_bridge = QDoubleSpinBox()
+        self.sp_bridge.setRange(0.0, 3.0)
+        self.sp_bridge.setSingleStep(0.1)
+        self.sp_bridge.setValue(0.5)
+        self.sp_bridge.setSuffix(" s")
+        self.sp_bridge.setToolTip("断点桥接：同一位置的字幕被切成两段时，间隙小于该值就合回一个框"
+                                  "（0=关闭）")
+        form.addRow("断点桥接", self.sp_bridge)
 
         self.sp_minh = QSpinBox()
         self.sp_minh.setRange(0, 200)
@@ -73,4 +82,4 @@ class DetectParamsDialog(QDialog):
     def values(self) -> tuple:
         return (self.sp_step.value(), self.sp_iou.value(), self.sp_margin.value(),
                 self.sp_thresh.value(), self.sp_box.value(), self.sp_rec.value(),
-                self.sp_minh.value())
+                self.sp_minh.value(), self.sp_bridge.value())

@@ -140,6 +140,44 @@ def test_replace_boxes() -> None:
           and [b.id for b in p.boxes] == [new2[0].id])
 
 
+def test_bridge_gaps() -> None:
+    """断点桥接：同位置断段合并；相邻行/远距/超时不合。"""
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))), "tools"))
+    from auto_detect import bridge_gaps
+
+    def B(x, y, w, h, s, e):
+        return {"x": x, "y": y, "w": w, "h": h, "start": s, "end": e}
+
+    # 同位置断两段（间隙 20 帧）→ 合并
+    r = bridge_gaps([B(100, 900, 400, 60, 0, 100),
+                     B(100, 900, 400, 60, 120, 200)], 20)
+    check("断段合并", len(r) == 1 and r[0]["start"] == 0 and r[0]["end"] == 200,
+          str(r))
+
+    # 间隙 30 > 20 → 不合并
+    r = bridge_gaps([B(100, 900, 400, 60, 0, 100),
+                     B(100, 900, 400, 60, 131, 200)], 20)
+    check("超间隙不合并", len(r) == 2, str(r))
+
+    # 上下相邻两行字幕（垂直不重叠）→ 不合并
+    r = bridge_gaps([B(100, 900, 400, 60, 0, 100),
+                     B(100, 980, 400, 60, 105, 200)], 20)
+    check("相邻行不误并", len(r) == 2, str(r))
+
+    # 水平错开（不同位置的文字）→ 不合并
+    r = bridge_gaps([B(100, 900, 200, 60, 0, 100),
+                     B(600, 900, 200, 60, 105, 200)], 20)
+    check("不同位置不合并", len(r) == 2, str(r))
+
+    # 三段链式合并
+    r = bridge_gaps([B(100, 900, 400, 60, 0, 50),
+                     B(100, 900, 400, 60, 60, 120),
+                     B(100, 900, 400, 60, 130, 200)], 20)
+    check("链式合并", len(r) == 1 and r[0]["start"] == 0 and r[0]["end"] == 200,
+          str(r))
+
+
 def test_merge_logic() -> None:
     """检测框合并：位置相近且时间连续的并入同簇。"""
     sys.path.insert(0, os.path.join(ROOT, "tools"))
@@ -236,8 +274,8 @@ def test_real_material() -> None:
     check("检测跑在 GPU", "CUDAExecutionProvider" in result.get("providers", []),
           str(result.get("providers")))
     check("阈值参数随结果返回", result.get("thresh") == 0.6
-          and result.get("box_thresh") == 0.8 and result.get("rec_score") == 0.95
-          and result.get("min_h") == 20,
+          and result.get("box_thresh") == 0.8 and result.get("rec_score") == 0.8
+          and result.get("min_h") == 20 and result.get("bridge_sec") == 0.5,
           f"thresh={result.get('thresh')} box_thresh={result.get('box_thresh')} "
           f"rec_score={result.get('rec_score')} min_h={result.get('min_h')}")
     check("小字已过滤", all(b["h"] >= 20 for b in result.get("boxes", [])),
@@ -320,6 +358,7 @@ def main() -> int:
     test_selection_ui()
     test_frame_click_select()
     test_replace_boxes()
+    test_bridge_gaps()
     test_merge_logic()
     test_project_format()
     test_real_material()

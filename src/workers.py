@@ -27,7 +27,8 @@ AUTO_DETECT_SCRIPT = os.path.join(
 def run_detect_subprocess(video: str, step_sec: float, iou_thr: float,
                           margin: int, on_progress=None,
                           thresh: float = 0.6, box_thresh: float = 0.8,
-                          rec_score: float = 0.95, min_h: int = 20) -> dict:
+                          rec_score: float = 0.8, min_h: int = 20,
+                          bridge_sec: float = 0.5) -> dict:
     """调用 tools/auto_detect.py 子进程跑检测，返回结果 JSON(dict)。
 
     on_progress(frame_no) 由子进程 stderr 的 PROGRESS 行驱动。
@@ -39,6 +40,7 @@ def run_detect_subprocess(video: str, step_sec: float, iou_thr: float,
            "--iou", str(iou_thr), "--margin", str(margin),
            "--thresh", str(thresh), "--box-thresh", str(box_thresh),
            "--rec-score", str(rec_score), "--min-h", str(min_h),
+           "--bridge-sec", str(bridge_sec),
            "--out", out_json, "--progress"]
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
                             stderr=subprocess.PIPE, text=True,
@@ -222,7 +224,8 @@ class DetectWorker(QThread):
 
     def __init__(self, video: str, step_sec: float = 0.1, iou_thr: float = 0.3,
                  margin: int = 3, thresh: float = 0.6, box_thresh: float = 0.8,
-                 rec_score: float = 0.95, min_h: int = 20, parent=None):
+                 rec_score: float = 0.8, min_h: int = 20,
+                 bridge_sec: float = 0.5, parent=None):
         super().__init__(parent)
         self.video = video
         self.step_sec = step_sec
@@ -232,6 +235,7 @@ class DetectWorker(QThread):
         self.box_thresh = box_thresh
         self.rec_score = rec_score
         self.min_h = min_h
+        self.bridge_sec = bridge_sec
 
     def run(self) -> None:
         try:
@@ -239,7 +243,8 @@ class DetectWorker(QThread):
                 self.video, self.step_sec, self.iou_thr, self.margin,
                 on_progress=lambda f: self.progress.emit(f),
                 thresh=self.thresh, box_thresh=self.box_thresh,
-                rec_score=self.rec_score, min_h=self.min_h)
+                rec_score=self.rec_score, min_h=self.min_h,
+                bridge_sec=self.bridge_sec)
             boxes = result_to_boxes(result)
             summary = (f"{result.get('sampled', 0)} 采样帧 / "
                        f"{result.get('det_seconds', '?')}s / "
@@ -263,7 +268,8 @@ class GenerateWorker(QThread):
     def __init__(self, videos: List[str], step_sec: float = 0.1,
                  iou_thr: float = 0.3, margin: int = 3,
                  thresh: float = 0.6, box_thresh: float = 0.8,
-                 rec_score: float = 0.95, min_h: int = 20, parent=None):
+                 rec_score: float = 0.8, min_h: int = 20,
+                 bridge_sec: float = 0.5, parent=None):
         super().__init__(parent)
         self.videos = videos
         self.step_sec = step_sec
@@ -273,6 +279,7 @@ class GenerateWorker(QThread):
         self.box_thresh = box_thresh
         self.rec_score = rec_score
         self.min_h = min_h
+        self.bridge_sec = bridge_sec
         self._cancel = False
 
     def cancel(self) -> None:
@@ -296,7 +303,8 @@ class GenerateWorker(QThread):
                     video, self.step_sec, self.iou_thr, self.margin,
                     on_progress=lambda f: None,
                     thresh=self.thresh, box_thresh=self.box_thresh,
-                    rec_score=self.rec_score, min_h=self.min_h)
+                    rec_score=self.rec_score, min_h=self.min_h,
+                    bridge_sec=self.bridge_sec)
                 p = build_project_from_detect(video, result)
                 saved = p.save(pj_path)
                 summary["ok"] += 1

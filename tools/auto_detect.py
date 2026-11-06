@@ -154,6 +154,45 @@ def union(a: Rect, b: Rect) -> Rect:
     return (x0, y0, x1 - x0, y1 - y0)
 
 
+def _spatially_same(a: Dict, b: Dict, ov_ratio: float = 0.5) -> bool:
+    """两框水平、垂直重叠比例都 >= ov_ratio 视为同一字幕的不同段。"""
+    ax1, ay1 = a["x"] + a["w"], a["y"] + a["h"]
+    bx1, by1 = b["x"] + b["w"], b["y"] + b["h"]
+    ow = min(ax1, bx1) - max(a["x"], b["x"])
+    oh = min(ay1, by1) - max(a["y"], b["y"])
+    if ow <= 0 or oh <= 0:
+        return False
+    return (ow / min(a["w"], b["w"]) >= ov_ratio
+            and oh / min(a["h"], b["h"]) >= ov_ratio)
+
+
+def bridge_gaps(boxes: List[Dict], max_gap: int) -> List[Dict]:
+    """桥接同一句字幕被切成多段的框，消除中间无框的空洞。
+
+    max_gap: 允许桥接的最大帧间隙（frames）。空间重叠不足的不合并，
+    避免把上下相邻的两行字幕误并成一个。
+    """
+    if not boxes:
+        return boxes
+    merged: List[Dict] = []
+    for b in sorted(boxes, key=lambda x: (x["y"], x["x"], x["start"])):
+        hit = None
+        for m in merged:
+            if b["start"] - m["end"] - 1 <= max_gap and _spatially_same(m, b):
+                hit = m
+                break
+        if hit is None:
+            merged.append(dict(b))
+        else:
+            x, y, w, h = union((hit["x"], hit["y"], hit["w"], hit["h"]),
+                               (b["x"], b["y"], b["w"], b["h"]))
+            hit.update(x=x, y=y, w=w, h=h,
+                       start=min(hit["start"], b["start"]),
+                       end=max(hit["end"], b["end"]))
+    merged.sort(key=lambda b: (b["y"], b["x"]))
+    return merged
+
+
 def clusters_to_boxes(clusters: List[Dict], step: int, margin: int,
                       nb_frames: int, width: int, height: int) -> List[Dict]:
     """簇 → 擦除框：时间上下各扩一个采样间隔，像素外扩 margin。"""
@@ -178,7 +217,8 @@ def clusters_to_boxes(clusters: List[Dict], step: int, margin: int,
 def detect(video: str, step_sec: float = 0.1, iou_thr: float = 0.3,
            margin: int = 3, out_path: Optional[str] = None,
            on_progress=None, thresh: float = 0.6, box_thresh: float = 0.8,
-           rec_score: float = 0.95, min_h: int = 20) -> Dict:
+           rec_score: float = 0.8, min_h: int = 20,
+           bridge_sec: float = 0.5) -> Dict:
     from rapidocr_onnxruntime import RapidOCR
 
     meta = ffprobe_meta(video)
@@ -217,13 +257,17 @@ def detect(video: str, step_sec: float = 0.1, iou_thr: float = 0.3,
     gap = step * 2
     clusters = merge_detections(dets, iou_thr, gap)
     boxes = clusters_to_boxes(clusters, step, margin, nb_frames, w, h)
+    # 桥接被切段的同位置字幕，消除中间无框的空洞
+    bridge_frames = max(0, int(round(fps * bridge_sec)))
+    if bridge_frames > 0:
+        boxes = bridge_gaps(boxes, bridge_frames)
 
     result = {"video": os.path.abspath(video), "fps": fps,
               "nb_frames": nb_frames, "nb_frames_exact": meta["nb_frames_exact"],
               "width": w, "height": h, "step_frames": step,
               "sampled": n_sampled, "providers": providers,
               "thresh": thresh, "box_thresh": box_thresh, "rec_score": rec_score,
-              "min_h": min_h,
+              "min_h": min_h, "bridge_sec": bridge_sec,
               "det_seconds": det_seconds, "boxes": boxes}
     if out_path:
         with open(out_path, "w", encoding="utf-8") as f:
@@ -241,10 +285,12 @@ def main() -> int:
                     help="DBNet 概率图二值化阈值（小=框更松更全）")
     ap.add_argument("--box-thresh", dest="box_thresh", type=float, default=0.8,
                     help="候选框整体置信度门槛（小=保留更多弱候选）")
-    ap.add_argument("--rec-score", type=float, default=0.95,
+    ap.add_argument("--rec-score", type=float, default=0.8,
                     help="OCR 识别过滤分数：识别置信度低于它的一律丢弃（杀误检主手段）")
     ap.add_argument("--min-h", dest="min_h", type=int, default=20,
                     help="最小文字高度(px)：检测框高度低于它的一律丢弃（过滤小字）")
+    ap.add_argument("--bridge-sec", type=float, default=0.5,
+                    help="断点桥接：同一位置字幕两段框间隙小于该秒数则合并（0=关闭）")
     ap.add_argument("--out", default=None, help="输出 JSON 路径")
     ap.add_argument("--progress", action="store_true", help="stderr 输出进度")
     args = ap.parse_args()
@@ -255,7 +301,8 @@ def main() -> int:
     r = detect(args.video, args.step_sec, args.iou, args.margin, args.out,
                on_progress=prog if args.progress else None,
                thresh=args.thresh, box_thresh=args.box_thresh,
-               rec_score=args.rec_score, min_h=args.min_h)
+               rec_score=args.rec_score, min_h=args.min_h,
+               bridge_sec=args.bridge_sec)
     print(json.dumps({
         "providers": r["providers"], "det_seconds": r["det_seconds"],
         "sampled": r["sampled"], "boxes": len(r["boxes"]),
