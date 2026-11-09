@@ -194,20 +194,25 @@ def _size_similar(a: Dict, b: Dict, sim: float = 0.8) -> bool:
 def bridge_gaps(boxes: List[Dict], max_gap: int, sim: float = 0.8) -> List[Dict]:
     """修复同一行字幕被切成多段导致的空洞，同时避免框尺寸膨胀。
 
-    - 尺寸接近的相邻段（宽高比 >= sim）：合并成一个框（时间/矩形取并集）
-    - 尺寸差异大的相邻段（换句、长短变化）：不合并矩形，只把前一段的
-      end 延到后一段开头，填掉时间空洞；两段各自保留自己的矩形
+    - 严格按时间先后处理（按 start 排序），只承接「已结束」的前驱段
+    - 只桥接真实间隙 0 <= gap <= max_gap 的段：时间重叠/倒挂一律不桥接。
+      OCR 框的 x 每帧会抖动几像素，按 x 排序会让时间顺序倒挂，
+      负 gap 恒 <= max_gap 曾导致任意跨度的两段被并成一个大框
+    - 有多个候选前驱时取间隙最小的，避免跨过近段去接远段
+    - 尺寸接近的段合并矩形；尺寸差异大的只把前一段 end 补到后一段开头
     """
-    if not boxes:
+    if not boxes or max_gap <= 0:
         return boxes
     out: List[Dict] = []
-    for b in sorted(boxes, key=lambda x: (x["y"], x["x"], x["start"])):
+    for b in sorted(boxes, key=lambda x: (x["start"], x["y"], x["x"])):
         b = dict(b)
-        target = None
+        target, best_gap = None, None
         for m in reversed(out):
-            if _same_line(m, b) and b["start"] - m["end"] - 1 <= max_gap:
-                target = m
-                break
+            gap = b["start"] - m["end"] - 1
+            if gap < 0 or gap > max_gap or not _same_line(m, b):
+                continue
+            if best_gap is None or gap < best_gap:
+                target, best_gap = m, gap
         if target is not None:
             if _size_similar(target, b, sim):
                 x, y, w, h = union((target["x"], target["y"],
@@ -220,7 +225,7 @@ def bridge_gaps(boxes: List[Dict], max_gap: int, sim: float = 0.8) -> List[Dict]
             if b["start"] - 1 > target["end"]:      # 只补时间洞
                 target["end"] = b["start"] - 1
         out.append(b)
-    out.sort(key=lambda b: (b["y"], b["x"]))
+    out.sort(key=lambda b: (b["y"], b["x"], b["start"]))
     return out
 
 

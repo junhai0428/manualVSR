@@ -217,6 +217,38 @@ def test_bridge_gaps() -> None:
           and min(b["w"] for b in r) == 150, str(r))
     check("长短交替无时间空洞", cov, str([(b["start"], b["end"]) for b in r]))
 
+    # 回归：OCR 框 x 每帧抖动几像素，按 (y,x,start) 排序会让时间倒挂；
+    # 负 gap 恒 <= max_gap，曾把任意跨度的两段并成一个覆盖空白画面的大框
+    boxes = [B(100, 900, 400, 60, 0, 100),
+             B(105, 900, 400, 60, 200, 300),
+             B(110, 900, 400, 60, 120, 150)]
+    r = bridge_gaps(boxes, 15)
+    check("时间倒挂不误并", len(r) == 3,
+          str([(b["start"], b["end"]) for b in r]))
+    check("倒挂不产生超大框", max(b["end"] - b["start"] for b in r) == 100,
+          str([(b["start"], b["end"]) for b in r]))
+
+    # 真实素材症状：11.00s 与 11.90s 两段字幕 x 差 2px，间隔 0.7s > 0.5s 阈值
+    boxes = [B(288, 495, 168, 105, 357, 363),
+             B(286, 498, 168, 105, 330, 336)]
+    r = bridge_gaps(boxes, 15)
+    check("超阈值倒挂段不合并",
+          len(r) == 2 and sorted((b["start"], b["end"]) for b in r)
+          == [(330, 336), (357, 363)], str(r))
+
+    # 时间重叠的两段一律不桥接
+    boxes = [B(100, 900, 400, 60, 0, 100),
+             B(100, 900, 400, 60, 80, 180)]
+    r = bridge_gaps(boxes, 15)
+    check("时间重叠不桥接", len(r) == 2 and r[0]["end"] == 100
+          and r[1]["start"] == 80, str(r))
+
+    # 正常断段仍要能合回一个框
+    r = bridge_gaps([B(100, 900, 400, 60, 0, 100),
+                     B(103, 900, 400, 60, 112, 200)], 15)
+    check("x 抖动的正常断段仍合并", len(r) == 1
+          and r[0]["start"] == 0 and r[0]["end"] == 200, str(r))
+
 
 def test_merge_logic() -> None:
     """检测框合并：位置相近且时间连续的并入同簇。"""
