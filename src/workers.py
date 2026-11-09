@@ -11,17 +11,30 @@ from typing import List, Optional
 
 from PySide6.QtCore import QThread, Signal
 
+from .env import detect_python
 from .inpaint_engine import InpaintEngine
 from .eraser import EraseTask
 from .project import Project, Box, Settings, default_project_path, default_output_path
 from .video_io import VideoMeta, probe
 
-# 检测子进程环境（rapidocr-onnxruntime + onnxruntime-gpu）
-DETECT_PYTHON = os.environ.get(
-    "SUBERASER_DETECT_PY", r"<OCR_ENV>\Scripts\python.exe")
 AUTO_DETECT_SCRIPT = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "tools", "auto_detect.py")
+
+DETECT_PYTHON_HINT = (
+    "未配置自动检测解释器（需要装了 rapidocr-onnxruntime + onnxruntime-gpu 的环境）："
+    "请设置环境变量 SUBERASER_DETECT_PY，或在项目根 local_config.json 里填 "
+    "\"detect_python\": \"<该环境>/Scripts/python.exe\"")
+
+
+def detect_python_path() -> str:
+    """检测子进程解释器：环境变量 > local_config.json，未配置时抛清晰错误。"""
+    py = detect_python()
+    if not py:
+        raise RuntimeError(DETECT_PYTHON_HINT)
+    if not os.path.exists(py):
+        raise RuntimeError(f"检测解释器不存在: {py}\n{DETECT_PYTHON_HINT}")
+    return py
 
 
 def run_detect_subprocess(video: str, step_sec: float, iou_thr: float,
@@ -36,7 +49,7 @@ def run_detect_subprocess(video: str, step_sec: float, iou_thr: float,
     """
     out_json = os.path.join(
         tempfile.gettempdir(), f"suberase_detect_{os.getpid()}.json")
-    cmd = [DETECT_PYTHON, AUTO_DETECT_SCRIPT,
+    cmd = [detect_python_path(), AUTO_DETECT_SCRIPT,
            "--video", video, "--step-sec", str(step_sec),
            "--iou", str(iou_thr), "--margin", str(margin),
            "--thresh", str(thresh), "--box-thresh", str(box_thresh),

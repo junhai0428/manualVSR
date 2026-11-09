@@ -3,12 +3,34 @@
 加载视频 → 按时间段框选画面中的文字 → 一键用 IOPaint(lama) 把框内文字擦除。
 框的位置和时段**精确到帧**，存在工程 JSON 里可反复修改复用。
 
+## 环境准备
+
+需要一个装了 `PySide6` + `iopaint`（torch）的 Python 环境，并在项目根新建
+`local_config.json`（**不入版本库**）指明路径：
+
+```json
+{
+  "python":        "C:/envs/iopaint/Scripts/python.exe",
+  "detect_python": "C:/envs/ocr/Scripts/python.exe",
+  "model_dir":     "D:/models"
+}
+```
+
+| 字段 | 说明 | 对应环境变量 |
+|---|---|---|
+| `python` | 跑本项目的解释器 | `SUBERASER_PYTHON` |
+| `detect_python` | 跑自动检测（RapidOCR）的解释器，需装 `rapidocr-onnxruntime` + `onnxruntime-gpu` | `SUBERASER_DETECT_PY` |
+| `model_dir` | lama 权重缓存目录 | `SUBERASER_MODEL_DIR` |
+| `test_video` | 自测素材路径（可选） | `SE_TEST_VIDEO` |
+
+环境变量优先级高于配置文件；只写用得上的字段即可。
+
 ## 启动
 
 ```
 双击 启动.bat
 ```
-或 `<MAIN_ENV>\Scripts\python.exe run.py`
+或 `<你的解释器> run.py`
 
 首次启动会在后台加载 lama 模型（10~50 秒），状态栏右侧显示 `模型 lama | 设备 cuda` 后即可擦除。
 
@@ -101,13 +123,15 @@
 
 ## 自测
 
-用真实素材 `tests/douyin_012.mp4`（720x1280 竖屏 439 帧）做端到端验证，不依赖自造视频。
-可用环境变量 `SE_TEST_VIDEO` 指定其它素材。
+用一段真实竖屏视频素材做端到端验证，不依赖自造视频。素材**不入版本库**，
+用 `SE_TEST_VIDEO` 或 `local_config.json` 的 `test_video` 指向本地文件；
+未配置或文件不存在时，相关测试自动跳过（返回码 0）。
 
-```
-<MAIN_ENV>\Scripts\python.exe tests/test_smoke.py   # seek精度/引擎batch/端到端擦除
-<MAIN_ENV>\Scripts\python.exe tests/test_gui.py     # GUI 全流程（offscreen 模拟拖框/键盘/擦除）
-<MAIN_ENV>\Scripts\python.exe tests/test_batch.py   # 批量串行 + 断点续跑
+```bash
+<你的解释器> tests/test_smoke.py    # seek精度/引擎batch/端到端擦除
+<你的解释器> tests/test_gui.py      # GUI 全流程（offscreen 模拟拖框/键盘/擦除）
+<你的解释器> tests/test_batch.py    # 批量串行 + 断点续跑
+<你的解释器> tests/test_detect.py   # 分轨道/自动检测/工程格式
 ```
 
 端到端判据（不靠目测）：自动定位素材字幕行 → 擦除后框内**白色文字像素数应归零**

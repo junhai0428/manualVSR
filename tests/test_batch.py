@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """批量擦除自测：同一真实素材 + 两个不同时段的工程，串行跑 + 断点续跑。
 
-运行:  <MAIN_ENV>\Scripts\python.exe tests/test_batch.py
+运行:  <你的 Python 解释器> tests/test_batch.py
 """
 from __future__ import annotations
 
@@ -25,8 +25,10 @@ from src.project import Project, Box, Settings  # noqa: E402
 from src.inpaint_engine import InpaintEngine  # noqa: E402
 from src.ui.batch_dialog import BatchDialog  # noqa: E402
 from src.video_io import probe  # noqa: E402
+from src.env import test_video  # noqa: E402
 
-VIDEO = os.environ.get("SE_TEST_VIDEO") or r"<PROJECT_DIR>\tests\douyin_012.mp4"
+# 真实素材：SE_TEST_VIDEO / local_config.json 的 test_video / tests/douyin_012.mp4
+VIDEO = test_video()
 OUTDIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_out")
 J1 = os.path.join(OUTDIR, "batch_a.suberase.json")
 J2 = os.path.join(OUTDIR, "batch_b.suberase.json")
@@ -69,6 +71,10 @@ def make_project(path: str, y0: float, y1: float, t0: int, t1: int, out: str) ->
 
 
 def main() -> int:
+    if not os.path.exists(VIDEO):
+        print(f"[SKIP] 未找到测试素材: {VIDEO}\n"
+              f"       用环境变量 SE_TEST_VIDEO 或 local_config.json 的 test_video 指定")
+        return 0
     os.makedirs(OUTDIR, exist_ok=True)
     for f in (O1, O2, J1, J2):
         if os.path.exists(f):
@@ -76,7 +82,7 @@ def main() -> int:
                 os.remove(f)
             except OSError:
                 pass
-    check("素材存在", os.path.exists(VIDEO), VIDEO)
+    check("素材存在", True, VIDEO)
     meta = probe(VIDEO)
     check("素材信息", meta.nb_frames > 100, f"{meta.width}x{meta.height} {meta.nb_frames}帧")
 

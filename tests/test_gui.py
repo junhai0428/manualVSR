@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 r"""GUI 冒烟测试（offscreen）：打开视频 → 拖框 → 键盘逐帧 → 设出点 → 一键擦除。
 
-运行:  <MAIN_ENV>\Scripts\python.exe tests/test_gui.py
+运行:  <你的 Python 解释器> tests/test_gui.py
 """
 from __future__ import annotations
 
@@ -24,8 +24,10 @@ from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox  # noqa: E4
 from src.ui.main_window import MainWindow  # noqa: E402
 from src.project import default_project_path  # noqa: E402
 from src.video_io import probe  # noqa: E402
+from src.env import test_video  # noqa: E402
 
-VIDEO = os.environ.get("SE_TEST_VIDEO") or r"<PROJECT_DIR>\tests\douyin_012.mp4"
+# 真实素材：SE_TEST_VIDEO / local_config.json 的 test_video / tests/douyin_012.mp4
+VIDEO = test_video()
 OUTDIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_out")
 OUT = os.path.join(OUTDIR, "gui_out.mp4")
 
@@ -58,8 +60,12 @@ def wait_until(pred, timeout_ms=120000, step=100):
 
 
 def main() -> int:
+    if not os.path.exists(VIDEO):
+        print(f"[SKIP] 未找到测试素材: {VIDEO}\n"
+              f"       用环境变量 SE_TEST_VIDEO 或 local_config.json 的 test_video 指定")
+        return 0
     os.makedirs(OUTDIR, exist_ok=True)
-    check("素材存在", os.path.exists(VIDEO), VIDEO)
+    check("素材存在", True, VIDEO)
     # 清掉上一轮遗留的工程文件，保证从干净状态开始
     pj = default_project_path(VIDEO)
     if os.path.exists(pj):

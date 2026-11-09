@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 r"""自测：探测 → seek 精度 → 引擎 batch 推理 → 端到端擦除。
 
-运行:  <MAIN_ENV>\Scripts\python.exe tests/test_smoke.py
+运行:  <你的 Python 解释器> tests/test_smoke.py
 """
 from __future__ import annotations
 
@@ -20,9 +20,10 @@ from src.video_io import probe, FrameReader, count_frames_exact, nvenc_available
 from src.project import Project, Box, Settings, default_output_path  # noqa: E402
 from src.inpaint_engine import InpaintEngine  # noqa: E402
 from src.eraser import EraseTask, plan_segments, merged_crop  # noqa: E402
+from src.env import test_video  # noqa: E402
 
-# 真实素材（可用环境变量 SE_TEST_VIDEO 覆盖），不自造测试视频
-VIDEO = os.environ.get("SE_TEST_VIDEO") or r"<PROJECT_DIR>\tests\douyin_012.mp4"
+# 真实素材：SE_TEST_VIDEO / local_config.json 的 test_video / tests/douyin_012.mp4
+VIDEO = test_video()
 OUTDIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_out")
 OUT = os.path.join(OUTDIR, "douyin_012_clean.mp4")
 
@@ -228,6 +229,10 @@ def test_e2e(m, eng) -> None:
 
 
 def main() -> int:
+    if not os.path.exists(VIDEO):
+        print(f"[SKIP] 未找到测试素材: {VIDEO}\n"
+              f"       用环境变量 SE_TEST_VIDEO 或 local_config.json 的 test_video 指定")
+        return 0
     print(f"测试素材: {VIDEO}")
     (m,) = test_probe()
     test_seek(m)

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 r"""自测：时间轴分轨道 + 文字自动检测（合并逻辑/工程格式/真实素材集成）。
 
-运行:  <MAIN_ENV>\Scripts\python.exe tests/test_detect.py
+运行:  <你的 Python 解释器> tests/test_detect.py
 """
 from __future__ import annotations
 
@@ -295,19 +295,24 @@ def test_project_format() -> None:
 
 
 def test_real_material() -> None:
-    """真实素材集成：调 auto_detect 子进程（<OCR_ENV>），核对结果与工程落盘。"""
+    """真实素材集成：调 auto_detect 子进程（独立 OCR 环境），核对结果与工程落盘。"""
     from src.workers import run_detect_subprocess, build_project_from_detect
+    from src.env import test_video
 
-    video = os.environ.get("SE_TEST_VIDEO") or \
-        r"<PROJECT_DIR>\tests\douyin_012.mp4"
+    video = test_video()
     if not os.path.exists(video):
-        check("真实素材存在", False, video)
+        print(f"SKIP  真实素材未找到: {video}"
+              f"（用 SE_TEST_VIDEO 或 local_config.json 的 test_video 指定）")
         return
     check("真实素材存在", True, video)
 
     frames = []
-    result = run_detect_subprocess(video, 0.5, 0.3, 8,
-                                   on_progress=frames.append)
+    try:
+        result = run_detect_subprocess(video, 0.5, 0.3, 8,
+                                       on_progress=frames.append)
+    except RuntimeError as e:
+        print(f"SKIP  自动检测未执行: {e}")
+        return
     check("子进程检测完成", len(result.get("boxes", [])) > 0,
           f"{result.get('sampled')} 采样帧 / {result.get('det_seconds')}s / "
           f"{len(result.get('boxes', []))} 框 / providers={result.get('providers')}")

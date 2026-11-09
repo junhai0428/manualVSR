@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 r"""入口：先设置缓存/线程环境变量（必须在 import torch 之前），再启动 GUI。
 
-用法:  <MAIN_ENV>\Scripts\python.exe run.py
+用法:  <你的 Python 解释器> run.py（需装 PySide6 + iopaint）
+       推荐直接双击 启动.bat —— 它会从 local_config.json / SUBERASER_PYTHON 取解释器
 """
 import os
 import sys

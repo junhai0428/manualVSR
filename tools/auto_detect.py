@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 """文字区域自动检测（RapidOCR det+rec）→ 擦除框 JSON。
 
-独立子进程脚本，运行在 <OCR_ENV> 环境（rapidocr-onnxruntime +
-onnxruntime-gpu），不依赖本项目 venv。RapidOCR 原生管线出框，rec 识别过滤误检，
+独立子进程脚本，运行在单独的 OCR 环境（rapidocr-onnxruntime + onnxruntime-gpu），
+不依赖本项目 venv（该环境解释器由环境变量 SUBERASER_DETECT_PY 或
+local_config.json 的 detect_python 指定）。RapidOCR 原生管线出框，rec 识别过滤误检，
 跨采样帧的框合成时间簇得到擦除框。输入视频，输出 JSON：
 {
   "video", "fps", "nb_frames", "width", "height", "step_frames",

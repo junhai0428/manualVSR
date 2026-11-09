@@ -1,16 +1,24 @@
 # -*- coding: utf-8 -*-
-"""把 lama 权重统一到 E 盘缓存目录，避免 C 盘爆满 + 路径错位导致模型扫描不到。
+"""把 lama 权重统一到指定缓存目录，避免系统盘爆满 + 路径错位导致模型扫描不到。
 
+缓存目录由 local_config.json 的 `model_dir` 或环境变量 SUBERASER_MODEL_DIR 指定。
 必须在 import torch 之前设置 XDG_CACHE_HOME（torch.hub.get_dir() 会读它）。
 """
 import os
 import shutil
 import sys
 
-CACHE_ROOT = r"<MAIN_ENV>\models"
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+
+from src.env import model_dir  # noqa: E402
+
+CACHE_ROOT = model_dir()
 CANDIDATE_SOURCES = [
     os.path.join(os.path.expanduser("~"), ".cache", "torch", "hub", "checkpoints", "big-lama.pt"),
-    r"<USERPROFILE>\.cache\torch\hub\checkpoints\big-lama.pt",
+    os.path.join(os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"),
+                 "torch", "hub", "checkpoints", "big-lama.pt"),
 ]
 MODEL_NAME = "big-lama.pt"
 MD5 = "e3aa4aaa15225a33ec84f9f4bc47e500"

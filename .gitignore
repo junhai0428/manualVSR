@@ -5,3 +5,9 @@ __pycache__/
 *.log
 tests/_out/
 *.suberase.json
+
+# 本机私有配置（解释器、模型目录等绝对路径，不入版本库）
+local_config.json
+
+# 测试素材（用 SE_TEST_VIDEO 或 local_config.json 的 test_video 指定）
+tests/*.mp4
