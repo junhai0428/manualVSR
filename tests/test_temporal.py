@@ -17,7 +17,10 @@ sys.path.insert(0, ROOT)
 
 from src.eraser import (feather_alpha, estimate_shift, warp_shift,  # noqa: E402
                         bg_usable, composite, find_clean_ref, fade_blend,
-                        BG_FADE_FRAMES, MIN_PHASE_RESP)
+                        adaptive_alpha, temporal_update, resample_carry,
+                        carry_weight,
+                        BG_FADE_FRAMES, MIN_PHASE_RESP, ALPHA_MIN_SHIFT,
+                        ALPHA_FULL_SHIFT, CARRY_FADE, ANCHOR_MAX_PX)
 from src.project import Project, Settings  # noqa: E402
 
 ok_all = True
@@ -133,6 +136,96 @@ def test_compensated_ema() -> None:
           f"{e_raw:.2f} -> {e_mc:.2f}")
 
 
+def test_adaptive_alpha() -> None:
+    check("自适应 α：静止镜头归零", adaptive_alpha(0.6, 0.0, 0.0) == 0.0)
+    check("自适应 α：亚像素微动归零", adaptive_alpha(0.6, 0.3, 0.3) == 0.0,
+          f"hypot={np.hypot(0.3, 0.3):.2f} < {ALPHA_MIN_SHIFT}")
+    mid = adaptive_alpha(0.6, (ALPHA_MIN_SHIFT + ALPHA_FULL_SHIFT) / 2.0, 0.0)
+    check("自适应 α：中段线性缩放", abs(mid - 0.3) < 1e-6, f"mid={mid:.3f}")
+    check("自适应 α：位移足够用满额",
+          abs(adaptive_alpha(0.6, 0.0, 5.0) - 0.6) < 1e-6)
+    check("自适应 α：α=0 时恒为 0", adaptive_alpha(0.0, 9.0, 9.0) == 0.0)
+
+
+def test_anchor_ema() -> None:
+    """锚点系 EMA：亚像素插值不逐帧累积，长镜头不越擦越糊。"""
+    rng = np.random.default_rng(23)
+    N, DX, DY, ALPHA = 24, 1.3, 0.9, 0.6
+    # 用平滑底图：真实画面相邻像素高度相关，不像白噪声那样一次亚像素插值就失真
+    base = cv2.GaussianBlur((rng.random((90, 140, 3)) * 200 + 20).astype(np.float32),
+                            (0, 0), 4.0)
+    gt, res = [], []
+    for t in range(N):
+        M = np.float32([[1, 0, DX * t], [0, 1, DY * t]])
+        gt.append(cv2.warpAffine(base, M, (140, 90), flags=cv2.INTER_CUBIC,
+                                 borderMode=cv2.BORDER_REPLICATE))
+        res.append(gt[-1] + rng.normal(0, 1.0, base.shape).astype(np.float32))
+
+    # 旧实现：对屏幕系已插值的结果连续 warp
+    old = res[0].copy()
+    for t in range(1, N):
+        old = (1 - ALPHA) * res[t] + ALPHA * warp_shift(old, DX, DY)
+
+    # 新实现：状态钉在锚点坐标系，每帧进出各一次
+    state, acc_x, acc_y = res[0].copy(), 0.0, 0.0
+    fill = res[0]
+    for t in range(1, N):
+        acc_x += DX
+        acc_y += DY
+        state, fill, reset = temporal_update(state, res[t], ALPHA, acc_x, acc_y)
+        if reset:
+            acc_x = acc_y = 0.0
+
+    # 只比中心区：边缘是 BORDER_REPLICATE 造出来的假内容，真实使用中框外有 margin
+    def err(img, ref):
+        return float(np.abs(img - ref)[20:70, 20:120].mean())
+
+    e_old, e_new = err(old, gt[-1]), err(fill, gt[-1])
+    check("锚点 EMA 比累积式更接近真值", e_new < e_old * 0.85,
+          f"锚点 {e_new:.2f} vs 累积 {e_old:.2f}")
+
+    # 误差不应随帧数单调上涨（累积式的典型症状）
+    state2, f_early = res[0].copy(), res[0]
+    for t in range(1, 5):
+        state2, f_early, _ = temporal_update(state2, res[t], ALPHA, DX * t, DY * t)
+    e_early = err(f_early, gt[4])
+    check("锚点 EMA 误差不随帧数增长", e_new <= e_early * 1.5 + 0.5,
+          f"第4帧 {e_early:.2f} → 第{N}帧 {e_new:.2f}")
+
+    s2, f2, reset = temporal_update(state, res[-1], ALPHA, ANCHOR_MAX_PX + 5.0, 0.0)
+    check("锚点漂移过远自动重新锚定", bool(reset) and bool(np.allclose(f2, s2)),
+          f"{ANCHOR_MAX_PX}+5px")
+
+
+def test_carry_resample() -> None:
+    prev_crop = (100, 100, 300, 260)                       # 200x160
+    prev_fill = np.full((160, 200, 3), 42, np.float32)
+    prev_fill[:, :, 1] = 84
+    crop = (150, 80, 320, 240)                             # 170x160，仅部分重叠
+    got = resample_carry(prev_fill, prev_crop, crop)
+    check("跨段重采样：有重叠就返回", got is not None)
+    img, valid = got
+    check("跨段重采样：尺寸跟随本段 crop",
+          img.shape == (160, 170, 3) and valid.shape == (160, 170),
+          f"{img.shape}")
+    dx1, dy1 = 150 - crop[0], 100 - crop[1]
+    zone = img[dy1:dy1 + 5, dx1:dx1 + 5]
+    check("跨段重采样：重叠区内容原样搬运",
+          bool((zone[:, :, 0] == 42).all()) and bool((zone[:, :, 1] == 84).all())
+          and bool(valid[dy1:dy1 + 5, dx1:dx1 + 5].all()))
+    check("跨段重采样：非重叠区标记无效",
+          (not valid[0, 0]) and float(img[0, 0].sum()) == 0.0)
+    check("跨段重采样：完全无重叠返回 None",
+          resample_carry(prev_fill, prev_crop, (500, 500, 600, 600)) is None)
+    check("跨段重采样：尺寸对不上返回 None",
+          resample_carry(prev_fill[:10], prev_crop, crop) is None)
+    check("跨段渐变权重单调降到 0",
+          carry_weight(CARRY_FADE) > carry_weight(1) > 0.0
+          and carry_weight(0) == 0.0
+          and abs(carry_weight(CARRY_FADE) - CARRY_FADE / (CARRY_FADE + 1)) < 1e-9,
+          f"w={carry_weight(CARRY_FADE):.2f} → {carry_weight(0):.2f}")
+
+
 def test_fade_blend() -> None:
     b = 0.0
     for _ in range(BG_FADE_FRAMES):
@@ -183,6 +276,9 @@ def main() -> int:
     test_composite()
     test_bg_usable()
     test_compensated_ema()
+    test_adaptive_alpha()
+    test_anchor_ema()
+    test_carry_resample()
     test_fade_blend()
     test_clean_ref()
     test_settings_compat()

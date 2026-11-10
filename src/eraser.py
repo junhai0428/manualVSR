@@ -85,6 +85,11 @@ MAX_SHIFT_PX = 40            # 单帧位移超过它视为失准（场景切换�
 BG_TOL = 12.0                # 真实背景与当前帧 mask 外的平均差上限
 BG_TEXT_RATIO = 0.06         # 候选背景 mask 内白字占比上限
 BG_FADE_FRAMES = 3           # 真实背景与平滑结果切换的渐变帧数
+BG_MAX_SHIFT = 96.0          # 参考背景累计位移超它就不再采信
+ALPHA_MIN_SHIFT = 0.5        # 帧间位移低于它（镜头基本静止）→ α 归零
+ALPHA_FULL_SHIFT = 2.0       # 帧间位移达到它 → 用满 α
+ANCHOR_MAX_PX = 32.0         # 锚点累计位移超它就把锚点前移到当前帧
+CARRY_FADE = 3               # 跨段延续平滑的渐变帧数
 
 
 def feather_alpha(mask: np.ndarray, px: int) -> np.ndarray:
@@ -172,6 +177,83 @@ def fade_blend(current: float, target: float,
                                    1.0 / max(1, frames)))
 
 
+def adaptive_alpha(base: float, dx: float, dy: float,
+                   min_shift: float = ALPHA_MIN_SHIFT,
+                   full_shift: float = ALPHA_FULL_SHIFT) -> float:
+    """按帧间位移幅度缩放时域平滑强度。
+
+    镜头基本静止（位移 < min_shift）时不做 EMA：这时对齐全靠亚像素插值，
+    平滑没有收益，反而把每帧微小的修复差异抹成贴片/拖影。
+    位移越大，逐帧修复的随机纹理差异越明显，平滑收益越大，线性升到满额。
+    """
+    if base <= 0.0:
+        return 0.0
+    s = float(np.hypot(dx, dy))
+    if s <= min_shift:
+        return 0.0
+    t = (s - min_shift) / max(1e-6, full_shift - min_shift)
+    return float(base * min(1.0, t))
+
+
+def temporal_update(smooth: np.ndarray, cur: np.ndarray, alpha: float,
+                    dx: float, dy: float) -> Tuple[np.ndarray, np.ndarray, bool]:
+    """锚点系 EMA：状态钉在锚定帧坐标系，每帧只做「进一次、出一次」两次重采样。
+
+    直接对屏幕系结果连续 warp（`s = warp((1-α)·r + α·s)`）会让亚像素插值的
+    模糊逐帧累积，慢摇移素材上越擦越糊。这里把状态存回锚点坐标系，
+    模糊不随帧数增长。累计位移超过 ANCHOR_MAX_PX 就把锚点前移到当前帧。
+
+    返回 (新状态, 当前帧系填充, 是否需要重置累计位移)。
+    """
+    r_anchor = warp_shift(cur, -dx, -dy)          # 当前结果搬进锚点系
+    state = ((1.0 - alpha) * r_anchor + alpha * smooth).astype(np.float32)
+    fill = warp_shift(state, dx, dy)              # 一次搬回当前帧
+    if abs(dx) > ANCHOR_MAX_PX or abs(dy) > ANCHOR_MAX_PX:
+        # 位移太远，锚点处的旧内容已被 warparound 拉花，就地重新锚定
+        return fill.copy(), fill, True
+    return state, fill, False
+
+
+def carry_weight(left: int, frames: int = CARRY_FADE) -> float:
+    """跨段延续的混合权重：left 帧内从 frames/(frames+1) 线性降到 0。"""
+    return max(0.0, float(left)) / float(max(1, frames) + 1)
+
+
+def resample_carry(prev_fill: np.ndarray, prev_crop: Tuple[int, int, int, int],
+                   crop: Tuple[int, int, int, int]
+                   ) -> Optional[Tuple[np.ndarray, np.ndarray]]:
+    """把上一段 crop 坐标系下的填充图搬到新 crop 坐标系。
+
+    段切换时 crop 可能整体平移/缩放，两段只有部分重叠。这里只做整数平移
+    （不缩放、不插值，避免给延续内容引入额外模糊），重叠之外的部分交给
+    valid 掩码，由调用方回退到本段自己的修复结果。
+
+    返回 (img, valid)；两段完全无重叠时返回 None。
+    """
+    if prev_fill is None:
+        return None
+    px1, py1, px2, py2 = prev_crop
+    x1, y1, x2, y2 = crop
+    ch, cw = y2 - y1, x2 - x1
+    if ch <= 0 or cw <= 0:
+        return None
+    ox1, oy1 = max(px1, x1), max(py1, y1)
+    ox2, oy2 = min(px2, x2), min(py2, y2)
+    if ox2 <= ox1 or oy2 <= oy1:
+        return None
+    ph, pw = prev_fill.shape[0], prev_fill.shape[1]
+    if (py2 - py1, px2 - px1) != (ph, pw):
+        return None
+    img = np.zeros((ch, cw, prev_fill.shape[2]), np.float32)
+    valid = np.zeros((ch, cw), bool)
+    sx1, sy1 = ox1 - px1, oy1 - py1
+    dx1, dy1 = ox1 - x1, oy1 - y1
+    w, h = ox2 - ox1, oy2 - oy1
+    img[dy1:dy1 + h, dx1:dx1 + w] = prev_fill[sy1:sy1 + h, sx1:sx1 + w]
+    valid[dy1:dy1 + h, dx1:dx1 + w] = True
+    return img, valid
+
+
 def find_clean_ref(seg_a: int, active_segments: List[Tuple[int, int]],
                    max_back: int = 6) -> Optional[int]:
     """往前找一帧不带任何擦除框的真实背景，避免把上一段字幕贴回来。"""
@@ -193,7 +275,8 @@ class EraseTask:
         self.engine = engine
         self.cancel_flag = False
         self.stats = {"frames": 0, "inpainted": 0, "seconds": 0.0, "encoder": "",
-                      "canceled": False, "error": "", "bg_frames": 0.0}
+                      "canceled": False, "error": "", "bg_frames": 0.0,
+                      "carry_frames": 0}
 
     def cancel(self) -> None:
         self.cancel_flag = True
@@ -211,6 +294,10 @@ class EraseTask:
 
         done = 0
         inpainted = 0
+        carry_img = None          # 上一段末帧的填充（按上一段 crop 坐标系存）
+        carry_valid = None
+        carry_crop = None
+        carry_left = 0
         segments = plan_segments(total, self.project.boxes)
         active_segments = [(a, b) for a, b, bs in segments if bs]
         try:
@@ -219,6 +306,9 @@ class EraseTask:
                     self.stats["canceled"] = True
                     break
                 if not seg_boxes:
+                    # 中间隔着无字幕帧，延续已无意义
+                    carry_img = carry_valid = carry_crop = None
+                    carry_left = 0
                     for f in range(seg_a, seg_b):
                         frame = reader.read(f)
                         if frame is None:
@@ -235,10 +325,11 @@ class EraseTask:
                     a_map = feather_alpha(mask, st.feather_px)
                     bs = self.engine.auto_batch(ch, cw, st.batch_size) if self.engine else 4
 
-                    # 段内时域状态：换段必须重置（crop 与字幕位置都变了）
-                    smooth = None                 # 稳定填充图 float32 [ch,cw,3]
+                    # 段内时域状态：crop 变了，能迁移的迁移，不能迁移的才重置
+                    smooth = None                 # 锚点系稳定填充图 float32 [ch,cw,3]
+                    s_dx, s_dy = 0.0, 0.0         # 锚点 -> 当前帧累计位移
                     prev_gray = None              # 上一帧灰度（运动估计用）
-                    acc_dx, acc_dy = 0.0, 0.0    # 相对参考帧的累计位移
+                    bg_dx, bg_dy = 0.0, 0.0       # 参考背景帧 -> 当前帧累计位移
                     ref_bg = None                 # 段前无字幕帧的真实背景
                     bg_blend = 0.0               # 真实背景占比（渐变切换）
                     if st.real_bg and seg_a > 0:
@@ -248,6 +339,18 @@ class EraseTask:
                             ref_bg = ref_frame[crop[1]:crop[3], crop[0]:crop[2]].copy()
                             prev_gray = cv2.cvtColor(ref_frame, cv2.COLOR_BGR2GRAY)
                     alpha = max(0.0, min(0.95, float(st.temporal_alpha)))
+
+                    # 跨段延续：把上一段末尾的填充按整数平移搬进本段 crop，3 帧渐变交接
+                    if carry_img is not None and carry_crop is not None:
+                        got = resample_carry(carry_img, carry_crop, crop)
+                        if got is not None:
+                            carry_img, carry_valid = got
+                            carry_left = CARRY_FADE
+                        else:
+                            carry_img = carry_valid = None
+                            carry_left = 0
+                    else:
+                        carry_left = 0
 
                     f = seg_a
                     while f < seg_b:
@@ -270,6 +373,7 @@ class EraseTask:
                         img_b = np.stack(crops).astype(np.uint8)
                         msk_b = np.stack(masks).astype(np.uint8)
                         res = self.engine.inpaint_batch(img_b, msk_b)
+                        last_fill = None
                         for k, frame in enumerate(frames):
                             orig = frame[crop[1]:crop[3], crop[0]:crop[2]]
                             cur_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -277,34 +381,58 @@ class EraseTask:
                             if st.motion_comp and prev_gray is not None:
                                 dx, dy, _ = estimate_shift(
                                     prev_gray, cur_gray, (crop[1], crop[3]))
-                            acc_dx += dx
-                            acc_dy += dy
+                            bg_dx += dx
+                            bg_dy += dy
 
                             r = res[k].astype(np.float32)
-                            if smooth is None:
+                            # 平滑强度随帧间位移缩放：静止/微动不做 EMA，避免贴片拖影
+                            a = adaptive_alpha(alpha, dx, dy) if st.motion_comp else alpha
+                            if smooth is None or a <= 0.0:
+                                # 锚点前移到当前帧：状态就是本帧结果，不留历史残留
                                 smooth = r.copy()
-                            elif alpha > 0:
-                                prev_aligned = warp_shift(smooth, dx, dy)
-                                smooth = (1.0 - alpha) * r + alpha * prev_aligned
+                                s_dx = s_dy = 0.0
+                                fill = r
                             else:
-                                smooth = r
+                                s_dx += dx
+                                s_dy += dy
+                                smooth, fill, reset = temporal_update(
+                                    smooth, r, a, s_dx, s_dy)
+                                if reset:
+                                    s_dx = s_dy = 0.0
 
-                            fill = smooth
+                            # 跨段交接：本段前几帧与上一段的填充渐变混合，避免硬切
+                            if carry_left > 0 and carry_img is not None:
+                                w = carry_weight(carry_left)
+                                fill = np.where(
+                                    carry_valid[:, :, None],
+                                    (1.0 - w) * fill + w * carry_img, fill)
+                                carry_left -= 1
+                                self.stats["carry_frames"] += 1
+
                             if ref_bg is not None:
-                                bg = warp_shift(ref_bg, acc_dx, acc_dy)
-                                target = 1.0 if bg_usable(bg, orig, mask) else 0.0
+                                far = (abs(bg_dx) > BG_MAX_SHIFT
+                                       or abs(bg_dy) > BG_MAX_SHIFT)
+                                bg = warp_shift(ref_bg, bg_dx, bg_dy)
+                                if far:
+                                    target = 0.0      # 对齐走太远，参考背景已不可信
+                                else:
+                                    target = 1.0 if bg_usable(bg, orig, mask) else 0.0
                                 # 填充源渐变切换：单帧校验结果抖动不会造成来回跳
                                 bg_blend = fade_blend(bg_blend, target)
                                 if bg_blend > 0:
-                                    fill = ((1.0 - bg_blend) * smooth
+                                    fill = ((1.0 - bg_blend) * fill
                                             + bg_blend * bg.astype(np.float32))
                                     self.stats["bg_frames"] += bg_blend
 
                             frame[crop[1]:crop[3], crop[0]:crop[2]] = composite(
                                 orig, fill, a_map)
+                            last_fill = fill
                             writer.write(frame)
                             prev_gray = cur_gray
                             done += 1
+                        if last_fill is not None:
+                            carry_img = np.ascontiguousarray(last_fill, dtype=np.float32)
+                            carry_crop = crop
                         inpainted += len(frames)
                         f = end
                         if on_progress:

@@ -19,7 +19,7 @@ sys.path.insert(0, os.path.join(ROOT, "src"))
 from src.video_io import probe, FrameReader, count_frames_exact, nvenc_available  # noqa: E402
 from src.project import Project, Box, Settings, default_output_path  # noqa: E402
 from src.inpaint_engine import InpaintEngine  # noqa: E402
-from src.eraser import EraseTask, plan_segments, merged_crop  # noqa: E402
+from src.eraser import EraseTask, plan_segments, merged_crop, CARRY_FADE  # noqa: E402
 from src.env import test_video  # noqa: E402
 
 # 真实素材：SE_TEST_VIDEO / local_config.json 的 test_video / tests/douyin_012.mp4
@@ -228,6 +228,41 @@ def test_e2e(m, eng) -> None:
     check("时段外帧直通", pass_diff < 8, f"框内平均差 {pass_diff:.1f}（应只剩编码噪声）")
 
 
+def test_carry(m, eng) -> None:
+    """相邻两段框位置不同（crop 变了）：跨段延续要真的接上，不能硬重置。"""
+    bw = int(m.width * 0.8)
+    bh = max(60, int(m.height * 0.10))
+    bx = (m.width - bw) // 2
+    by = int(m.height * 0.42)
+    a0, a1 = 40, 70
+    b0, b1 = 71, 100
+    p = Project(video=VIDEO, meta={"fps": m.fps})
+    p.boxes = [Box(x=bx, y=by, w=bw, h=bh, start=a0, end=a1),
+               Box(x=bx + 30, y=by + 60, w=bw - 60, h=bh, start=b0, end=b1)]
+    p.settings = Settings(margin=48, dilate=3, encoder="auto",
+                          keep_audio=True, real_bg=False)
+    out = os.path.join(OUTDIR, "carry_out.mp4")
+    p.output = out
+    if os.path.exists(out):
+        try:
+            os.remove(out)
+        except OSError:
+            pass
+    segs = plan_segments(m.nb_frames, p.boxes)
+    active = [(a, b, len(bs)) for a, b, bs in segs if bs]
+    check("两个相邻字幕段", len(active) == 2 and active[0][1] == active[1][0],
+          str(active))
+
+    task = EraseTask(p, m, out, eng)
+    stats = task.run(on_progress=lambda d, t, msg: None)
+    check("跨段用例完成", not stats["error"] and os.path.exists(out),
+          f"{stats['inpainted']}帧 {stats['seconds']}s err={stats['error']}")
+    check("两段都擦除", stats["inpainted"] == (a1 - a0 + 1) + (b1 - b0 + 1),
+          f"inpainted={stats['inpainted']} 期望={(a1 - a0 + 1) + (b1 - b0 + 1)}")
+    check("跨段延续生效", stats["carry_frames"] >= CARRY_FADE,
+          f"carry_frames={stats['carry_frames']} 期望≥{CARRY_FADE}")
+
+
 def main() -> int:
     if not os.path.exists(VIDEO):
         print(f"[SKIP] 未找到测试素材: {VIDEO}\n"
@@ -239,6 +274,7 @@ def main() -> int:
     eng = test_engine()
     test_plan()
     test_e2e(m, eng)
+    test_carry(m, eng)
     print("\n" + ("=== ALL PASS ===" if ok_all else "=== 存在 FAIL ==="))
     return 0 if ok_all else 1
 
