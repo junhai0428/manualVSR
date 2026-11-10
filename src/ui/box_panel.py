@@ -7,8 +7,8 @@ from typing import List, Optional
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel,
                                QTableWidget, QTableWidgetItem, QAbstractItemView,
-                               QSpinBox, QPushButton, QComboBox, QCheckBox, QFormLayout,
-                               QHeaderView, QLineEdit)
+                               QSpinBox, QDoubleSpinBox, QPushButton, QComboBox,
+                               QCheckBox, QFormLayout, QHeaderView, QLineEdit)
 
 from ..project import Box, Project
 
@@ -108,16 +108,32 @@ class BoxPanel(QWidget):
         self.cb_encoder = QComboBox(); self.cb_encoder.addItems(["auto", "nvenc", "x264"])
         self.sp_crf = QSpinBox(); self.sp_crf.setRange(10, 35); self.sp_crf.setValue(18)
         self.ck_audio = QCheckBox("保留原音轨"); self.ck_audio.setChecked(True)
-        for w in (self.sp_margin, self.sp_dilate, self.sp_batch, self.sp_crf):
+        self.sp_talpha = QDoubleSpinBox(); self.sp_talpha.setRange(0.0, 0.95)
+        self.sp_talpha.setSingleStep(0.05); self.sp_talpha.setValue(0.6)
+        self.sp_talpha.setToolTip("相邻帧修复结果加权平均的强度：0=关闭，越大越稳（镜头摇移不会拖影）")
+        self.ck_motion = QCheckBox("运动补偿（镜头摇移）"); self.ck_motion.setChecked(True)
+        self.ck_motion.setToolTip("先按镜头位移对齐上一帧结果再平均，避免摇移时产生拖影")
+        self.sp_feather = QSpinBox(); self.sp_feather.setRange(0, 16)
+        self.sp_feather.setValue(3); self.sp_feather.setSuffix(" px")
+        self.sp_feather.setToolTip("向内羽化：只柔化框内边缘，0=硬替换")
+        self.ck_realbg = QCheckBox("真实背景优先"); self.ck_realbg.setChecked(True)
+        self.ck_realbg.setToolTip("字幕出现前的真实背景对齐后可用时直接贴回（零闪烁、无生成伪影）")
+        for w in (self.sp_margin, self.sp_dilate, self.sp_batch, self.sp_crf,
+                  self.sp_talpha, self.sp_feather):
             w.valueChanged.connect(self._on_settings_changed)
         self.cb_encoder.currentTextChanged.connect(self._on_settings_changed)
-        self.ck_audio.toggled.connect(self._on_settings_changed)
+        for ck in (self.ck_audio, self.ck_motion, self.ck_realbg):
+            ck.toggled.connect(self._on_settings_changed)
         fs.addRow("外扩 margin", self.sp_margin)
         fs.addRow("mask 膨胀", self.sp_dilate)
         fs.addRow("batch(0=自动)", self.sp_batch)
         fs.addRow("编码器", self.cb_encoder)
         fs.addRow("质量 cq/crf", self.sp_crf)
         fs.addRow(self.ck_audio)
+        fs.addRow("时域平滑 α", self.sp_talpha)
+        fs.addRow(self.ck_motion)
+        fs.addRow("向内羽化", self.sp_feather)
+        fs.addRow(self.ck_realbg)
         root.addWidget(gs)
         root.addStretch(1)
 
@@ -144,6 +160,10 @@ class BoxPanel(QWidget):
         self.sp_crf.setValue(s.crf)
         self.cb_encoder.setCurrentText(s.encoder)
         self.ck_audio.setChecked(s.keep_audio)
+        self.sp_talpha.setValue(s.temporal_alpha)
+        self.ck_motion.setChecked(s.motion_comp)
+        self.sp_feather.setValue(s.feather_px)
+        self.ck_realbg.setChecked(s.real_bg)
         self._updating = False
         self.refresh()
 
@@ -330,3 +350,7 @@ class BoxPanel(QWidget):
         s.encoder = self.cb_encoder.currentText()
         s.crf = self.sp_crf.value()
         s.keep_audio = self.ck_audio.isChecked()
+        s.temporal_alpha = self.sp_talpha.value()
+        s.motion_comp = self.ck_motion.isChecked()
+        s.feather_px = self.sp_feather.value()
+        s.real_bg = self.ck_realbg.isChecked()

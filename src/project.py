@@ -81,6 +81,11 @@ class Settings:
     crf: int = 18
     keep_audio: bool = True
     model: str = "lama"
+    # 时域稳定（消除镜头摇移下逐帧修复的闪烁）
+    temporal_alpha: float = 0.6   # 0 = 关闭时域平滑
+    motion_comp: bool = True      # 按镜头位移对齐后再平均
+    feather_px: int = 3           # 向内羽化像素，0 = 硬替换
+    real_bg: bool = True          # 优先使用相邻无字幕帧的真实背景
 
 
 @dataclass
